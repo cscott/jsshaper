@@ -9,34 +9,183 @@ var log = (typeof console !== "undefined") && console.log || print;
 
 // converts functions containing yield/yield() to generators.
 Shaper("yielder", function(root) {
-    var fns = [{fake:true,vars:[]}];
 
-    function stmts2conts(stmts, srcs, first) {
-        var i, c;
-        // look for the unsafe statement
-        var j = 1; // XXX really do this
-        var frame = Shaper.parse('_ = function() {}').children[1];
-        frame.body.children = stmts.slice(0, j);
-        frame.body.srcs = [].concat('{', srcs.slice(0, j));
-        if (srcs.length===0) { frame.body.srcs.push(''); }
-        frame.body.srcs[frame.body.srcs.length-1] += '}';
-        c = [ frame ];
-        if (j < stmts.length) {
-            c.push.apply(c, stmts2conts(stmts.slice(j), srcs.slice(j), first+c.length));
-        }
-        return c;
+    function funcBodyStart(body, start_src) {
+        start_src = start_src || '{';
+        body.children = [];
+        body.srcs = [start_src];
     }
+    function funcBodyAdd(body, stmt, src) {
+        body.children.push(stmt);
+        body.srcs.push(src);
+    }
+    function funcBodyFinish(body, close_src) {
+        close_src = close_src || '}';
+        body.srcs[body.srcs.length-1] += close_src;
+    }
+
+    function YieldVisitor() {
+        this.stack = [null];
+    }
+    YieldVisitor.prototype = {
+        top: function() { return this.stack[this.stack.length-1]; },
+        add: function(child, src) {
+            var top = this.top();
+            if (!top) {
+                this.newExternalCont();
+                top = this.top();
+            }
+            funcBodyAdd(top.body, child, src);
+        },
+        returnStmt: function(val) {
+            if (typeof val === 'number') {
+                val = String(val);
+            }
+            if (typeof val === 'string') {
+                val = Shaper.parse(val);
+            }
+            var returnStmt = Shaper.replace(
+                'function _(){return $;}',
+                val).body.children[0];
+            return returnStmt;
+        },
+        addReturn: function(where) {
+            var returnStmt = this.returnStmt(where);
+            this.add(returnStmt, '');
+            this.canFallThrough = false;
+            return returnStmt;
+        },
+        close: function() {
+            var top = this.top();
+            if (!top) {
+                this.stack.pop();
+            } else {
+                if (this.canFallThrough) {
+                    this.add(Shaper.parse('throw StopIteration;'), '');
+                }
+                funcBodyFinish(top.body);
+            }
+        },
+
+        newInternalCont: function() {
+            var frame = Shaper.parse('_ = function() {}').children[1];
+            funcBodyStart(frame.body);
+            var new_top = { func: frame, body: frame.body, catcher:false };
+            this.close();
+            this.stack.push(new_top);
+            this.canFallThrough = true;
+        },
+        newExternalCont: function() {
+            this.newInternalCont();
+            this.add(Shaper.parse('if (arguments[0]) { throw arguments[0]; }'),
+                     '');
+        },
+
+        visit: function(child, src) {
+            this.canFallThrough = true;
+            if (child.type in this) {
+                return this[child.type].call(this, child, src);
+            }
+            //this.newExternalCont();
+            this.add(Shaper.traverse(child, this), src);
+        },
+
+        visitBlock: function(children, srcs) {
+            var i;
+            console.assert(children.length === srcs.length);
+            for (i=0; i<children.length; i++) {
+                this.visit(children[i], srcs[i]);
+            }
+        },
+
+        // rewrite arguments, catch expressions, var nodes, etc.
+        pre: function(node, ref) {
+            if (node.type === tkn.FUNCTION) {
+                // skip nested functions.
+                return "break";
+            }
+            if (node.type === tkn.VAR) {
+                node.srcs[0] = node.srcs[0].replace('var', '');
+                node.type = tkn.COMMA;
+            }
+            if (node.type === tkn.IDENTIFIER &&
+                node.value === 'arguments') {
+                Shaper.renameIdentifier(node, '$'+node.value);
+            }
+            if (node.type === tkn.RETURN) {
+                this.canFallThrough = false;
+                return ref.set(Shaper.parse('throw StopIteration'));
+            }
+            if (node.type === tkn.YIELD) {
+                var value = Shaper.traverse(node.value, this);
+                var rval = Shaper.replace('_={cont:'+this.stack.length+
+                                          ',ret:$}', value).children[1];
+                var r = this.addReturn(rval);
+                this.newExternalCont();
+                // XXX this doesn't work for foo((yield a), (yield b))
+                //     or (yield a) + (yield b), etc.
+                ref.set(Shaper.parse('arguments[1]'));
+                return "break";
+            }
+        }
+    };
+    YieldVisitor.prototype[tkn.WHILE] = function(child, src) {
+        child.condition = Shaper.traverse(child.condition, this);
+        var loopStart = this.stack.length;
+        this.addReturn(loopStart);
+        this.newInternalCont();
+
+        // top of loop: check the condition.
+        var loopCheck = Shaper.parse("if (!($)) $");
+        loopCheck.condition.children[0].children[0] = child.condition;
+        loopCheck.thenPart = this.returnStmt(-1);
+        // transfer comments.
+        Shaper.cloneComments(loopCheck, child);
+        loopCheck.srcs[0] = child.srcs[0].replace('while', 'if');
+        this.add(loopCheck, '');
+
+        this.visit(child.body, '');
+        this.addReturn(loopStart);
+
+        // fixup loop check
+        loopCheck.thenPart.expression.value =
+            Shaper.parse(String(this.stack.length));
+        this.newInternalCont();
+    };
+    YieldVisitor.prototype[tkn.IF] = function(child, src) {
+        child.condition = Shaper.traverse(child.condition, this);
+        this.add(child, src);
+        this.canFallThrough = false; // both sides of IF will get returns
+
+        var thenPart = this.stack.length;
+        this.newInternalCont();
+        this.visit(child.thenPart, '');
+        var thenPlace = this.addReturn(this.stack.length);
+        // replace original thenPart with branch to continuation
+        child.thenPart = this.returnStmt(thenPart);
+
+        if (child.elsePart) {
+            var elsePart = this.stack.length;
+            this.newInternalCont();
+            this.visit(child.elsePart, '');
+            this.addReturn(this.stack.length);
+            // replace original elsePart with branch to continuation
+            child.elsePart = this.returnStmt(elsePart);
+            // fixup then part
+            thenPlace.expression.value =Shaper.parse(String(this.stack.length));
+        } else {
+            console.assert(child.srcs.length===3);
+            child.elsePart = this.returnStmt(this.stack.length);
+            child.srcs.splice(2, 0, ' else ');
+        }
+        this.newInternalCont();
+    };
 
     function alterFunc(node, props, ref) {
         var stmts = [];
-        var v=null, i;
+        var i;
         if (props.vars.length > 0) {
-            v = "var "+props.vars[0];
-            for (i=1; i<props.vars.length; i++) {
-                v += ', '+props.vars[i];
-            }
-            v += ';';
-            stmts.push(Shaper.parse(v));
+            stmts.push(Shaper.parse("var "+props.vars.join(',')+";"));
         }
         if (props['arguments']) {
             stmts.push(Shaper.parse('var $arguments = arguments;'));
@@ -44,37 +193,41 @@ Shaper("yielder", function(root) {
         if (props['catch']) {
             stmts.push(Shaper.parse('var $block = {};'));
         }
-        var conts = Shaper.parse('[]');
-        var c = stmts2conts(node.body.children, node.body.srcs.slice(1,-1), 0);
-        if (c.length) {
-            conts.children = c;
-            conts.srcs = [ '[' ];
-            for (i=1; i<c.length; i++) {
-                conts.srcs.push(',');
-            }
-            conts.srcs.push(']');
-        }
+        var yv = new YieldVisitor();
+        console.assert(node.body.children.length > 0);
+        // first and last node.body.srcs elements stay with outer function.
+        var old_srcs = node.body.srcs;
+        var inner_srcs = old_srcs.slice(1, old_srcs.length-1);
+        inner_srcs.push('');
+        yv.visitBlock(node.body.children, inner_srcs);
+        yv.close();
+
+        var conts = Shaper.replace('[' +
+                                   yv.stack.map(function(){return '$';})
+                                     .join(',') +
+                                   ']',
+                                   yv.stack.map(function(c){return c.func;}));
 
         // Note that we need to make a bogus function wrapper here or else
         // parse() will complain about the 'return outside of a function'
-        var newBody = Shaper.replace('function _(){return new Generator(this, $);}', conts).body.children[0];
+        var newBody = Shaper.replace(
+            'function _(){return new Generator(this, $);}',
+            conts).body.children[0];
         stmts.push(newBody);
 
-        var l = node.body.children.length;
-
+        // hollow out old function and replace it with new function body
+        funcBodyStart(node.body, old_srcs[0]);
         for (i=0; i<stmts.length; i++) {
-            Shaper.insertBefore(new Ref(node.body, "children", i),
-                                stmts[i]);
+            funcBodyAdd(node.body, stmts[i], '');
         }
-
-        for (i=0; i<l; i++) {
-            Shaper.remove(new Ref(node.body, "children", node.body.children.length-1));
-        }
+        funcBodyFinish(node.body, old_srcs[old_srcs.length-1]);
 
         return node;
     }
 
-    //var yieldTempl = Shaper.parse("yield($)");
+    // find functions containing 'yield' and take note of uses of
+    // 'arguments' and 'catch' as well.
+    var fns = [{fake:true,vars:[]}];
     return Shaper.traverse(root, {
         pre: function(node, ref) {
             if (node.type === tkn.FUNCTION) {
