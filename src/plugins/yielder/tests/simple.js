@@ -10,9 +10,11 @@ function range(start, end, step) {
 }
 var foo = function(a,b) {
     var x, y, z;
-    x = yield(a);
+    x = (yield (a)) + 2;
     y = this.bar(x);
-    z = yield(y);
+    z = 3 * (yield y);
+    z = (yield z).foo;
+    z = bar((yield 1), (yield 2), (yield z));
     baz(z);
     return;
 };
