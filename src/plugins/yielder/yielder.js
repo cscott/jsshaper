@@ -86,7 +86,7 @@ Shaper("yielder", function(root) {
             if (child.type in this) {
                 return this[child.type].call(this, child, src);
             }
-            //this.newExternalCont();
+            console.assert(!child.isLoop);
             this.add(Shaper.traverse(child, this), src);
         },
 
@@ -129,7 +129,29 @@ Shaper("yielder", function(root) {
             }
         }
     };
+    YieldVisitor.prototype[tkn.DO] = function(child, src) {
+        child.condition = Shaper.traverse(child.condition, this);
+        var loopStart = this.stack.length;
+        var ret = this.addReturn(loopStart);
+
+        this.newInternalCont();
+        this.visit(child.body, '');
+
+        // bottom of loop: check the condition.
+        var loopCheck = Shaper.parse("if ($) $");
+        loopCheck.condition = child.condition;
+        loopCheck.thenPart = this.returnStmt(loopStart);
+        // transfer comments.
+        Shaper.cloneComments(ret, child);
+        loopCheck.srcs[0] = child.srcs[1].replace('while', 'if');
+        loopCheck.thenPart.srcs[1] = src.substring(1);
+        this.add(loopCheck, '');
+
+        this.addReturn(this.stack.length);
+        this.newInternalCont();
+    };
     YieldVisitor.prototype[tkn.WHILE] = function(child, src) {
+        console.assert(src==='');
         child.condition = Shaper.traverse(child.condition, this);
         var loopStart = this.stack.length;
         this.addReturn(loopStart);
