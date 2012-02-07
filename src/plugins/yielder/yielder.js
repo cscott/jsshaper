@@ -236,7 +236,7 @@ Shaper("yielder", function(root) {
         }
         this.add(setup);
         // fixup comments
-        setup.leadingComment = child.leadingComment;
+        setup.leadingComment = child.leadingComment || '';
         setup.leadingComment += this.removeTokens(
             extraComment, tkn.FOR, tkn.LEFT_PAREN, tkn.SEMICOLON, tkn.END);
 
@@ -292,6 +292,9 @@ Shaper("yielder", function(root) {
             }
             // replace original elsePart with branch to continuation
             child.elsePart = this.returnStmt(elsePart);
+            if (child.srcs[2].length===4) {
+                child.srcs[2] += ' '; // ensure token separation
+            }
             // fixup then part
             if (thenPlace) {
                 thenPlace.expression.value =
