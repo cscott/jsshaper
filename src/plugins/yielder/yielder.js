@@ -1,6 +1,6 @@
 /*jshint globalstrict:true, eqeqeq:true, curly:true, latedef:true, newcap:true,
   undef:true, trailing:true */
-/*global require:false, console:false, print:false, tkn:false */
+/*global require:false, console:false, print:false, tkn:false, Narcissus:false */
 "use strict"; "use restrict";
 
 var Ref = Ref || require("ref.js") || Ref;
@@ -97,6 +97,21 @@ Shaper("yielder", function(root) {
                 this.visit(children[i], srcs[i]);
             }
         },
+        // slightly ugly way to remove tokens from srcs
+        removeTokens: function(src, tokens) {
+            var t = new Narcissus.lexer.Tokenizer(src);
+            var i;
+            for (i=1; i<arguments.length; i++) {
+                t.mustMatch(arguments[i]);
+            }
+            var r = '', start = 0;
+            for (i=1; i<t.tokens.length; i++) {
+                r += src.substring(start, t.tokens[i].start);
+                start = t.tokens[i].end;
+            }
+            r += src.substring(start);
+            return r;
+        },
 
         // rewrite arguments, catch expressions, var nodes, etc.
         pre: function(node, ref) {
@@ -105,7 +120,7 @@ Shaper("yielder", function(root) {
                 return "break";
             }
             if (node.type === tkn.VAR) {
-                node.srcs[0] = node.srcs[0].replace('var', '');
+                node.srcs[0] = this.removeTokens(node.srcs[0], tkn.VAR);
                 node.type = tkn.COMMA;
             }
             if (node.type === tkn.IDENTIFIER &&
@@ -143,8 +158,8 @@ Shaper("yielder", function(root) {
         loopCheck.thenPart = this.returnStmt(loopStart);
         // transfer comments.
         Shaper.cloneComments(ret, child);
-        loopCheck.srcs[0] = child.srcs[1].replace('while', 'if');
-        loopCheck.thenPart.srcs[1] = src.substring(1);
+        loopCheck.srcs[0] = child.srcs[1].replace(/^while/, 'if');
+        loopCheck.thenPart.srcs[1] = this.removeTokens(src, tkn.RIGHT_PAREN);
         this.add(loopCheck, '');
 
         this.addReturn(this.stack.length);
@@ -163,10 +178,55 @@ Shaper("yielder", function(root) {
         loopCheck.thenPart = this.returnStmt(-1);
         // transfer comments.
         Shaper.cloneComments(loopCheck, child);
-        loopCheck.srcs[0] = child.srcs[0].replace('while', 'if');
+        loopCheck.srcs[0] = child.srcs[0].replace(/^while/, 'if');
         this.add(loopCheck, '');
 
         this.visit(child.body, '');
+        this.addReturn(loopStart);
+
+        // fixup loop check
+        loopCheck.thenPart.expression.value =
+            Shaper.parse(String(this.stack.length));
+        this.newInternalCont();
+    };
+    YieldVisitor.prototype[tkn.FOR] = function(child, src) {
+        var setup, extraComment;
+        // if there is setup, emit it first.
+        if (child.setup) {
+            child.setup = Shaper.traverse(child.setup, this);
+            setup = Shaper.replace('$;', child.setup);
+            extraComment = child.srcs[0]+';';
+        } else {
+            setup = Shaper.parse(';');
+            extraComment = child.srcs[0];
+        }
+        this.add(setup);
+        // fixup comments
+        setup.leadingComment = child.leadingComment;
+        setup.leadingComment += this.removeTokens(
+            extraComment, tkn.FOR, tkn.LEFT_PAREN, tkn.SEMICOLON, tkn.END);
+
+        // now proceed like a while loop
+        child.condition = Shaper.traverse(child.condition, this);
+        var loopStart = this.stack.length;
+        this.addReturn(loopStart);
+        this.newInternalCont();
+
+        // top of loop: check the condition.
+        var loopCheck = Shaper.parse("if (!($)) $");
+        loopCheck.condition.children[0].children[0] = child.condition;
+        loopCheck.thenPart = this.returnStmt(-1);
+        this.add(loopCheck, '');
+
+        // loop body
+        this.visit(child.body, '');
+
+        // loop update
+        if (child.update) {
+            child.update = Shaper.traverse(child.update, this);
+            var update = Shaper.replace('$;', child.update);
+            this.add(update);
+        }
         this.addReturn(loopStart);
 
         // fixup loop check
