@@ -144,6 +144,31 @@ Shaper("yielder", function(root) {
             }
         }
     };
+    YieldVisitor.prototype[tkn.BLOCK] = function(node, src) {
+        var leading = node.leadingComment || '';
+        leading += this.removeTokens(node.srcs[0],
+                                     tkn.LEFT_CURLY);
+        var trailing = node.trailingComment || '';
+        trailing += src;
+
+        if (node.children.length===0) {
+            // make a semicolon node, just to have a place to put the
+            // comments.
+            var semi = Shaper.parse(';');
+            semi.leadingComment = this.removeTokens(leading, tkn.RIGHT_CURLY);
+            this.add(semi, trailing);
+            return;
+        }
+        // adjust comments.
+        var new_srcs = node.srcs.slice(1);
+        new_srcs[new_srcs.length-1] =
+            this.removeTokens(new_srcs[new_srcs.length-1], tkn.RIGHT_CURLY) +
+            trailing;
+        node.children[0].leadingComment = leading +
+            (node.children[0].leadingComment || '');
+        // visit the statements, in turn.
+        this.visitBlock(node.children, new_srcs);
+    };
     YieldVisitor.prototype[tkn.DO] = function(child, src) {
         child.condition = Shaper.traverse(child.condition, this);
         var loopStart = this.stack.length;
