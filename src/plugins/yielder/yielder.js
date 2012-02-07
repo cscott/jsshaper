@@ -442,6 +442,9 @@ Shaper("yielder", function(root) {
     function alterFunc(node, props, ref) {
         var stmts = [];
         var i;
+        // export the Generator and StopIteration
+        stmts.push(Shaper.parse('var $Generator = require("generator.js");'));
+        stmts.push(Shaper.parse('var StopIteration=$Generator.StopIteration;'));
         if (props.vars.length > 0) {
             stmts.push(Shaper.parse("var "+props.vars.join(',')+";"));
         }
@@ -469,7 +472,7 @@ Shaper("yielder", function(root) {
         // Note that we need to make a bogus function wrapper here or else
         // parse() will complain about the 'return outside of a function'
         var newBody = Shaper.replace(
-            'function _(){return new Generator(this, $);}',
+            'function _(){return new $Generator(this, $);}',
             conts).body.children[0];
         stmts.push(newBody);
 

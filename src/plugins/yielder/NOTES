@@ -1,0 +1,172 @@
+Support yield via a limited-scope CPS conversion.
+
+Pass in value and exception as function arguments to avoid creating objects
+on every closure invocation.  Refer to these as arguments[0] and arguments[1]
+to avoid pollution the name space.
+
+Pass in array of continuations to Generator constructor to avoid
+exposing it to namespace, then use integers instead of functions
+as values of the cont: property in return values.
+
+Optimize looping return as common case (ie, return a simple integer
+in this case, instead of creating an object wrapper).   This makes loops
+as fast as possible.
+
+// Sample source for yield conversion:
+
+function bat(arr) {
+  var i;
+  // [0]
+  for (i=0; i<arr.length; i++) {
+    // [1]
+    if (test.apply(arr[i], arguments)) {
+      // [2]
+      try {
+        something(null);
+        var j = yield arr[i];
+        // [3]
+        something(j);
+      } catch (e) {
+        // [4]
+        delete arr[i];
+      } finally {
+        // [5]
+        baz(i);
+      }
+      // [6]
+    }
+    // [7]
+  }
+  // [8]
+  return;
+}
+
+// This gets converted to:
+
+function bat(arr) {
+  var $arguments = arguments; // necessary because original uses 'arguments'
+  var $block = {};            // necessary because original has catch
+  var i, j; // hoisted
+  return new Generator(this, [
+    function() { // [0] (external, first)
+      if (arguments[0]) { throw arguments[0]; }
+      i = 0;
+      return 1; // looping continuation
+    },
+    function() { // [1] (internal)
+      // internal looping continuation, don't need to check arguments[0] for ex
+      // "if (!(i < arr.length)) break;"
+      if (i >= arr.length) { return 8; /* looping continuation, after loop */}
+      if (test.apply(arr[i], $arguments)) {
+        return 2;
+      }
+      return 7;
+    },
+    function() { // [2] (internal)
+      try {
+        something(null);
+        return { cont: 3, ret: arr[i] };
+      } catch (e) {
+        return { cont: 4, ex: e, again: true; };
+      }
+    },
+    function() { // [3] (external)
+      try {
+        // external continuation, need to check arguments[0]
+        if (arguments[0]) { throw arguments[0]; }
+        j = arguments[1];
+        something(j);
+        return 5; // finally
+      } catch (e) {
+        // don't allow catch of StopIteration
+        if (e===StopIteration) { throw e; }
+        return { cont: 4, ex: e, again: true };
+      }
+    },
+    function() { // [4] (internal, catch(e))
+      // note that e has block-level scope.  Requires an environment hack
+      $block = Object.create($block);
+      $block.e = arguments[0];
+      delete arr[i];
+      $block = Object.getPrototypeOf($block);
+      return 5; // finally
+    },
+    function() { // [5] (internal)
+      baz(i);
+      return 6; // after try
+    },
+    function() { // [6] (internal)
+      return 7; // after if
+    },
+    function() { // [7] (internal)
+      // implicit increment, belonging to for loop
+      i++;
+      return 1; // loop!
+    },
+    function() { // [8] (internal)
+      throw StopIteration;
+    }
+  ]);
+}
+
+// Using this helper to construct the generator object:
+
+function Generator(cont_this, cont_array) {
+  this._cont_this = cont_this;
+  this._cont_array = cont_array;
+  this._cont_next = cont_array[0];
+  this._first = true;
+  this._closed = false;
+}
+Generator.prototype = {
+  next: function() {
+    var undef;
+    return this.send(undef);
+  },
+  send: function(val) {
+    var undef;
+    if (this._first) {
+      this._first = false;
+      if (val !== undef) { throw new TypeError(); }
+    }
+    return this._send(null, val);
+  },
+  'throw': function(ex) {
+    return this._send(ex, null);
+  },
+  close: function() {
+    try {
+      // note that catch clauses have to be modified to ignore StopIteration
+      this['throw'].call(this, StopIteration);
+    } catch (e) {
+      if (e!==StopIteration) { throw e; }
+    } finally {
+      // generator should never be able to catch a StopIteration
+      // but just in case...
+      this._closed = true;
+    }
+  },
+  _send: function(exception, value) {
+    try {
+      if (this._closed) { throw StopIteration; }
+      var r;
+      while (true) { // this lets us do a simpler CPS conversion of loops
+        r = this._cont_next.call(this._cont_this, exception, value);
+        exception = value = null;
+        if (typeof(r)==='number') {
+          this._cont_next = this._cont_array[r];
+        } else {
+          this._cont_next = this._cont_array[r.cont];
+          if (r.again) {
+            exception = r.ex;
+          } else {
+            return r.ret;
+          }
+        }
+      }
+    } catch (e) {
+      this._closed = true;
+      throw e;
+    }
+  }
+};
