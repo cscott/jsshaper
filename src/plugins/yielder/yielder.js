@@ -137,7 +137,8 @@ Shaper("yielder", function(root) {
                 return ref.set(Shaper.parse('throw StopIteration'));
             }
             if (node.type === tkn.YIELD) {
-                var value = Shaper.traverse(node.value, this);
+                var value = Shaper.traverse(node.value, this,
+                                            new Ref(node, 'value'));
                 var rval = Shaper.replace('_={cont:'+this.stack.length+
                                           ',ret:$}', value).children[1];
                 var r = this.addReturn(rval);
@@ -175,7 +176,8 @@ Shaper("yielder", function(root) {
         this.visitBlock(node.children, new_srcs);
     };
     YieldVisitor.prototype[tkn.DO] = function(child, src) {
-        child.condition = Shaper.traverse(child.condition, this);
+        child.condition = Shaper.traverse(child.condition, this,
+                                          new Ref(child, 'condition'));
         var loopStart = this.stack.length;
         var ret = this.addReturn(loopStart);
 
@@ -199,7 +201,8 @@ Shaper("yielder", function(root) {
     };
     YieldVisitor.prototype[tkn.WHILE] = function(child, src) {
         console.assert(src==='');
-        child.condition = Shaper.traverse(child.condition, this);
+        child.condition = Shaper.traverse(child.condition, this,
+                                          new Ref(child, 'condition'));
         var loopStart = this.stack.length;
         this.addReturn(loopStart);
         this.newInternalCont();
@@ -227,7 +230,8 @@ Shaper("yielder", function(root) {
         var setup, extraComment;
         // if there is setup, emit it first.
         if (child.setup) {
-            child.setup = Shaper.traverse(child.setup, this);
+            child.setup = Shaper.traverse(child.setup, this,
+                                          new Ref(child, 'setup'));
             setup = Shaper.replace('$;', child.setup);
             extraComment = child.srcs[0]+';';
         } else {
@@ -241,7 +245,8 @@ Shaper("yielder", function(root) {
             extraComment, tkn.FOR, tkn.LEFT_PAREN, tkn.SEMICOLON, tkn.END);
 
         // now proceed like a while loop
-        child.condition = Shaper.traverse(child.condition, this);
+        child.condition = Shaper.traverse(child.condition, this,
+                                          new Ref(child, 'condition'));
         var loopStart = this.stack.length;
         this.addReturn(loopStart);
         this.newInternalCont();
@@ -258,7 +263,8 @@ Shaper("yielder", function(root) {
         // loop update
         if (this.canFallThrough) {
             if (child.update) {
-                child.update = Shaper.traverse(child.update, this);
+                child.update = Shaper.traverse(child.update, this,
+                                               new Ref(child, 'update'));
                 var update = Shaper.replace('$;', child.update);
                 this.add(update);
             }
@@ -271,7 +277,8 @@ Shaper("yielder", function(root) {
         this.newInternalCont();
     };
     YieldVisitor.prototype[tkn.IF] = function(child, src) {
-        child.condition = Shaper.traverse(child.condition, this);
+        child.condition = Shaper.traverse(child.condition, this,
+                                          new Ref(child, 'condition'));
         this.add(child, src);
         this.canFallThrough = false; // both sides of IF will get returns
 
