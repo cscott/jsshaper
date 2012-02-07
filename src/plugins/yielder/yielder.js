@@ -26,6 +26,7 @@ Shaper("yielder", function(root) {
 
     function YieldVisitor() {
         this.stack = [null];
+        this.tryStack = [];
     }
     YieldVisitor.prototype = {
         top: function() { return this.stack[this.stack.length-1]; },
@@ -71,10 +72,46 @@ Shaper("yielder", function(root) {
         },
 
         newInternalCont: function() {
-            var frame = Shaper.parse('_ = function() {}').children[1];
-            funcBodyStart(frame.body);
-            var new_top = { func: frame, body: frame.body, catcher:false };
             this.close();
+
+            var frame = Shaper.parse('_ = function() {}').children[1];
+            // number the continuation, for easier human tracing
+            frame.srcs[0] = 'function/*['+this.stack.length+']*/() ';
+
+            var new_top = { func: frame, body: frame.body, catcher:false };
+
+            // find active try block
+            var tb = null;
+            for (var i=this.tryStack.length-1; i>=0; i--) {
+                if (!this.tryStack[i].inCatch) {
+                    tb = this.tryStack[i];
+                    break;
+                }
+            }
+            if (tb) {
+                var v = tb.varName;
+                var tryBlock = Shaper.parse('try { $ } catch ('+v+') { }');
+                funcBodyStart(frame.body);
+                funcBodyAdd(frame.body, tryBlock, '');
+                funcBodyFinish(frame.body);
+                new_top.body = tryBlock.tryBlock;
+
+                // fill out catch block
+                var c = tryBlock.catchClauses[0].block, s;
+                funcBodyStart(c);
+                s = Shaper.parse('if ('+v+'===StopIteration) { throw '+v+'; }');
+                funcBodyAdd(c, s, '');
+                s = Shaper.parse('_={ cont:$, ex:'+v+', again:true }').
+                    children[1];
+                // record fixup needed for catch block.
+                tb.fixups.push(new Ref(s, 'children', 0, 'children', 1));
+                s = this.returnStmt(s);
+                funcBodyAdd(c, s, '');
+                // XXX fix handling of finally blocks
+                funcBodyFinish(c);
+            }
+            funcBodyStart(new_top.body);
+
             this.stack.push(new_top);
             this.canFallThrough = true;
         },
@@ -122,15 +159,43 @@ Shaper("yielder", function(root) {
         pre: function(node, ref) {
             if (node.type === tkn.FUNCTION) {
                 // skip nested functions.
+                // XXX this means that references to block-scoped catch
+                //     variables in nested functions will be wrong, ie:
+                //     try {
+                //       ...
+                //     } catch (e) {
+                //       return function() { return e; }
+                //     }
+                //     We should really do a much-more limited transformation
+                //     on nested functions to catch this case, being careful
+                //     to let function-scoped variables properly overshadow
+                //     the block scoped variable, ie:
+                //     try {
+                //       ...
+                //     } catch (e) {
+                //       return function(e) { return e; }
+                //       // or function() { var e; ... }
+                //     }
                 return "break";
             }
             if (node.type === tkn.VAR) {
                 node.srcs[0] = this.removeTokens(node.srcs[0], tkn.VAR);
                 node.type = tkn.COMMA;
             }
-            if (node.type === tkn.IDENTIFIER &&
-                node.value === 'arguments') {
-                Shaper.renameIdentifier(node, '$'+node.value);
+            if (node.type === tkn.IDENTIFIER) {
+                if (node.value === 'arguments') {
+                    Shaper.renameIdentifier(node, '$'+node.value);
+                } else {
+                    // is this an identifier on the try stack?
+                    for (var i=this.tryStack.length-1; i>=0; i--) {
+                        var t = this.tryStack[i];
+                        if (t.inCatch && t.varName === node.value) {
+                            var nn = Shaper.parse('$block.$'+node.value);
+                            Shaper.cloneComments(nn, node);
+                            return ref.set(nn);
+                        }
+                    }
+                }
             }
             if (node.type === tkn.RETURN) {
                 this.canFallThrough = false;
@@ -165,6 +230,11 @@ Shaper("yielder", function(root) {
             this.add(semi, trailing);
             return;
         }
+
+        // XXX could wrap '$block = Object.create($block);' and
+        //     '$block = Object.getPrototypeOf($block);' around contents
+        //     here to implement block scoping.
+
         // adjust comments.
         var new_srcs = node.srcs.slice(1);
         new_srcs[new_srcs.length-1] =
@@ -313,6 +383,60 @@ Shaper("yielder", function(root) {
             child.srcs.splice(2, 0, ' else ');
         }
         this.newInternalCont();
+    };
+    YieldVisitor.prototype[tkn.TRY] = function(node, src) {
+        var c,i,j;
+        var r = this.addReturn(this.stack.length);
+        if (node.leadingComment) {
+            r.leadingComment = node.leadingComment;
+        }
+        for (i=0; i<node.catchClauses.length; i++) {
+            c = node.catchClauses[i];
+            this.tryStack.push({varName:c.varName, fixups:[], inCatch:false});
+        }
+
+        this.newInternalCont();
+        this.visit(node.tryBlock, src); // XXX src should be used after finally
+        var finallyFixups = [];
+        finallyFixups.push(this.addReturn(-1));
+
+        // catch blocks
+        for (i=0; i<node.catchClauses.length; i++) {
+            var catchStart = this.stack.length;
+            c = this.tryStack[this.tryStack.length-1];
+            c.inCatch = true;
+            for (j=0; j<c.fixups.length; j++) {
+                c.fixups[j].set(Shaper.parse(String(catchStart)));
+            }
+            this.newInternalCont();
+            // set up scope
+            this.add(Shaper.parse('$block = Object.create($block);'), '');
+            var cc = node.catchClauses[i];
+            var s = Shaper.parse('$block.$'+cc.varName+' = arguments[0];');
+            Shaper.cloneComments(s, cc._name);
+            var extra = (cc.leadingComment||'') +
+                this.removeTokens(cc.srcs[0], tkn.CATCH, tkn.LEFT_PAREN);
+            s.leadingComment = extra + (s.leadingComment||'');
+            this.add(s, '');
+
+            this.visit(cc.block, '');
+
+            // XXX if we leave this block via exception we need to clean up
+            //     the block scope
+            if (this.canFallThrough) {
+                this.add(Shaper.parse('$block = Object.getPrototypeOf($block);'), '');
+                finallyFixups.push(this.addReturn(-1));
+            }
+            this.tryStack.pop();
+        }
+
+        // after try / finally (XXX finally isn't really supported yet)
+        var finallyLabel = this.stack.length;
+        this.newInternalCont();
+        for (i=0; i<finallyFixups.length; i++) {
+            finallyFixups[i].expression.value =
+                Shaper.parse(String(finallyLabel));
+        }
     };
 
     function alterFunc(node, props, ref) {
