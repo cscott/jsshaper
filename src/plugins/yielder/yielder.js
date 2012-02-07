@@ -50,6 +50,9 @@ Shaper("yielder", function(root) {
             return returnStmt;
         },
         addReturn: function(where) {
+            if (!this.canFallThrough) {
+                log("Adding unreachable return");
+            }
             var returnStmt = this.returnStmt(where);
             this.add(returnStmt, '');
             this.canFallThrough = false;
@@ -77,6 +80,8 @@ Shaper("yielder", function(root) {
         },
         newExternalCont: function() {
             this.newInternalCont();
+            // optimization: can't throw before generator has been started
+            if (this.stack.length===1) { return; }
             this.add(Shaper.parse('if (arguments[0]) { throw arguments[0]; }'),
                      '');
         },
@@ -185,9 +190,11 @@ Shaper("yielder", function(root) {
         Shaper.cloneComments(ret, child);
         loopCheck.srcs[0] = child.srcs[1].replace(/^while/, 'if');
         loopCheck.thenPart.srcs[1] = this.removeTokens(src, tkn.RIGHT_PAREN);
-        this.add(loopCheck, '');
 
-        this.addReturn(this.stack.length);
+        if (this.canFallThrough) {
+            this.add(loopCheck, '');
+            this.addReturn(this.stack.length);
+        }
         this.newInternalCont();
     };
     YieldVisitor.prototype[tkn.WHILE] = function(child, src) {
@@ -207,7 +214,9 @@ Shaper("yielder", function(root) {
         this.add(loopCheck, '');
 
         this.visit(child.body, '');
-        this.addReturn(loopStart);
+        if (this.canFallThrough) {
+            this.addReturn(loopStart);
+        }
 
         // fixup loop check
         loopCheck.thenPart.expression.value =
@@ -247,12 +256,14 @@ Shaper("yielder", function(root) {
         this.visit(child.body, '');
 
         // loop update
-        if (child.update) {
-            child.update = Shaper.traverse(child.update, this);
-            var update = Shaper.replace('$;', child.update);
-            this.add(update);
+        if (this.canFallThrough) {
+            if (child.update) {
+                child.update = Shaper.traverse(child.update, this);
+                var update = Shaper.replace('$;', child.update);
+                this.add(update);
+            }
+            this.addReturn(loopStart);
         }
-        this.addReturn(loopStart);
 
         // fixup loop check
         loopCheck.thenPart.expression.value =
@@ -267,7 +278,8 @@ Shaper("yielder", function(root) {
         var thenPart = this.stack.length;
         this.newInternalCont();
         this.visit(child.thenPart, '');
-        var thenPlace = this.addReturn(this.stack.length);
+        var thenPlace = this.canFallThrough ?
+            this.addReturn(this.stack.length) : null /*optimization*/;
         // replace original thenPart with branch to continuation
         child.thenPart = this.returnStmt(thenPart);
 
@@ -275,11 +287,16 @@ Shaper("yielder", function(root) {
             var elsePart = this.stack.length;
             this.newInternalCont();
             this.visit(child.elsePart, '');
-            this.addReturn(this.stack.length);
+            if (this.canFallThrough) {
+                this.addReturn(this.stack.length);
+            }
             // replace original elsePart with branch to continuation
             child.elsePart = this.returnStmt(elsePart);
             // fixup then part
-            thenPlace.expression.value =Shaper.parse(String(this.stack.length));
+            if (thenPlace) {
+                thenPlace.expression.value =
+                    Shaper.parse(String(this.stack.length));
+            }
         } else {
             console.assert(child.srcs.length===3);
             child.elsePart = this.returnStmt(this.stack.length);
