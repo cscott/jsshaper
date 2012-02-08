@@ -36,24 +36,26 @@ function bat(arr) {
          log(e);
          delete arr[i];
        } finally {
-         // [7b] // XXX
+         // [8]
          baz(i);
        }
-       // [8]
+       // [9]
      }
-     // [9]
+     // [10]
   }
-  // [10]
+  // [11]
   return;
 }
 
 // This gets converted to:
 
 function bat(arr) {
+  var $stop = {};
   var $arguments = arguments; // necessary because original uses 'arguments'
-  var $block = {};            // necessary because original has catch
+  var $catch$e;               // necessary because original has catch
+  var $finally;               // necessary because original has finally
   var i, j;
-  return new Generator(this, [
+  return new Generator(this, $stop, [
     function() { // [0] (external, but first: don't need to check arguments[0])
        i = 0;
        return 1; // looping continuation
@@ -61,11 +63,11 @@ function bat(arr) {
     function() { // [1] (internal)
        // internal looping continuation, don't need to check arguments[0] for ex
        // "if (!(i < arr.length)) break;"
-       if (i >= arr.length) { return 10; /* looping continuation, after loop */ }
+       if (i >= arr.length) { return 11; /* looping continuation, after loop */ }
        if (test.apply(arr[i], $arguments)) {
            return 2;
        }
-       return 9;
+       return 10;
     },
     function() { // [2] (internal)
        return 3; // top of try
@@ -75,8 +77,11 @@ function bat(arr) {
          something();
          return { cont: 4, ret: arr[i] }; // yield
        } catch (e) {
-         if (e===StopIteration) { throw e; } // XXX
-         return { cont: 7, ex: e, again: true; };
+         if (e===$stop) {
+           // (would rethrow e if there wasn't a finally block)
+           return { cont:8, ex:e, again:true; }; // branch to finally
+         }
+         return { cont:7, ex:e, again:true; }; // branch to catch
        }
     },
     function() { // [4] (external)
@@ -87,63 +92,75 @@ function bat(arr) {
         if (j) return 5;
         return 6;
       } catch (e) {
-        // don't allow catch of StopIteration
-        if (e===StopIteration) { throw e; } // XXX
-        return { cont: 7, ex: e, again: true };
+         if (e===$stop) {
+           return { cont:8, ex:e, again:true; }; // branch to finally
+         }
+         return { cont:7, ex:e, again:true; }; // branch to catch
       }
     },
     function() { // [5] (internal)
       try {
         something(j);
-        throw StopIteration; // return // XXX
+        throw $stop; // return
       } catch (e) {
-        if (e===StopIteration) { throw e; }
-        return { cont:7, ex:e, again:true };
+         if (e===$stop) {
+           return { cont:8, ex:e, again:true; }; // branch to finally
+         }
+         return { cont:7, ex:e, again:true; }; // branch to catch
       }
     },
     function() { // [6] (internal)
       try {
-        return 8;
+        return { cont:8, fall:true, again:true};// this falls through to finally
       } catch (e) {
-        if (e===StopIteration) { throw e; }
-        return { cont:7, ex:e, again:true };
+         if (e===$stop) {
+           return { cont:8, ex:e, again:true; }; // branch to finally
+         }
+         return { cont:7, ex:e, again:true; }; // branch to catch
       }
     },
     function() { // [7] (internal, catch(e))
-      // note that e has block-level scope.  Requires an environment hack
-      $block = Object.create($block);
-      $block.$e = arguments[0];
-      log($block.$e);
-      delete arr[i];
-      $block = Object.getPrototypeOf($block);
-      return 8; // XXX no finally
+      // note that e has block-level scope; this is desugared out.
+      $catch$e = arguments[0];
+      try {
+        log($catch$e);
+        delete arr[i];
+        $catch$e = null; // free!
+        return { cont:8, fall:true, again:true}; // fall through to finally
+      } catch (e) {
+        return { cont:8, ex:e, again:true; }; // branch to finally
+      }
     },
-    function() { // [7b] (internal, finally) // XXX
+    function() { // [8] (internal, finally)
+      $finally$ex = arguments[0];
+      $finally$fall = arguments[1];
       baz(i);
-      return 8; // after try
-    },
-    function() { // [8] (internal)
-      return 9; // after if
+      if ($finally$fall) return 9; // after try
+      throw $finally$ex;
     },
     function() { // [9] (internal)
+      return 10; // after if
+    },
+    function() { // [10] (internal)
       // implicit increment, belonging to for loop
       i++;
       return 1; // loop!
     },
-    function() { // [10] (internal)
-      throw StopIteration; // XXX
+    function() { // [11] (internal)
+      throw $stop;
     }
   ]);
 }
 
 // Using this helper to construct the generator object:
 
-function Generator(cont_this, cont_array) {
+function Generator(cont_this, cont_stop, cont_array) {
   this._cont_this = cont_this;
   this._cont_array = cont_array;
   this._cont_next = cont_array[0];
   this._first = true;
   this._closed = false;
+  this._cont_stop = cont_stop; // our stand-in for StopIteration
 }
 Generator.prototype = {
   next: function() {
@@ -162,16 +179,25 @@ Generator.prototype = {
     return this._send(ex, null);
   },
   close: function() {
+    if (this._closed) { return; }
     try {
       // note that catch clauses have to be modified to ignore StopIteration
-      this['throw'].call(this, StopIteration);
+      this['throw'].call(this, this._cont_stop);
     } catch (e) {
-      if (e!==StopIteration) { throw e; }
+      if (e!==this._cont_stop) { throw e; }
     } finally {
-      // generator should never be able to catch a StopIteration
-      // but just in case...
-      this._closed = true;
+      // should be impossible to catch this._cont_stop, so this._send should
+      // have already closed the generator.
+      console.assert(this._closed);
     }
+  },
+  _close: function() {
+    console.assert(!this._closed);
+    this._closed = true;
+    // free memory
+    this._cont_this = null;
+    this._cont_array = null;
+    this._cont_next = null;
   },
   _send: function(exception, value) {
     try {
@@ -185,14 +211,18 @@ Generator.prototype = {
         } else {
           this._cont_next = this._cont_array[r.cont];
           if (r.again) {
+            value = r.fall; // fallthrough, for finally blocks
             exception = r.ex;
+          } else if (r.ex) {
+            throw r.ex;
           } else {
             return r.ret;
           }
         }
       }
     } catch (e) {
-      this._closed = true;
+      this._close();
+      if (e===this._cont_stop) { throw StopIteration; }
       throw e;
     }
   }
