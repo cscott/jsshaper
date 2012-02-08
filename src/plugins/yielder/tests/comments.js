@@ -71,16 +71,24 @@ function bat(arr) {
     }
     return;
 }
+
 function emptyblock(b) {
 /*a*/if /*b*/ (/*c*/b/*d*/)/*e*/ { /*f*/
 /*g*/}/*h*/else/*i*/{/*j*/
 /*k*/  yield /*l*/ 1 /*m*/; /*n*/
 /*o*/}/*p*/
 }
+
 function trytest() {
 /*a*/try/*b*/{/*c*/
 /*d*/  foo/*e*/(/*f*/)/*g*/;/*h*/
 /*i*/}/*j*/catch/*k*/(/*l*/e/*m*/)/*n*/{/*o*/
 /*p*/   yield/*q*/e/*r*/;/*s*/
 /*t*/}/*u*/
+}
+
+function forin(o) {
+    var p;
+    /*a*/for/*b*/(/*c*/p/*d*/in/*e*/o/*f*/)/*g*/{/*h*/log(p);/*i*/}/*j*/
+    /*k*/for/*l*/(/*m*/var/*n*/pp/*o*/in/*p*/o/*q*/)/*r*/{/*s*/log(pp);/*t*/}/*u*/
 }

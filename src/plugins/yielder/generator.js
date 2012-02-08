@@ -1,4 +1,4 @@
-var StopIteration = new Error();
+StopIteration = require('stopiteration.js');
 
 function Generator(cont_this, cont_array) {
     this._cont_this = cont_this;
@@ -8,6 +8,7 @@ function Generator(cont_this, cont_array) {
     this._closed = false;
 }
 Generator.prototype = {
+    __iterator__: function() { return this; },
     next: function() {
         var undef;
         return this.send(undef);

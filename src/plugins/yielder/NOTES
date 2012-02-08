@@ -227,3 +227,30 @@ Generator.prototype = {
     }
   }
 };
+
+//------------------------------------
+for (o in ...) {
+  ...
+}
+maps to:
+
+$it=Iterator(...,true);
+while(true){
+  try {
+    o = $it.next();
+  } catch (e) {
+    if (e===StopIteration) { break; } // how does this work w/ generators?
+    throw e;
+  }
+  ...
+}
+
+for example,
+
+for (prop in obj) {
+  yield prop;
+}
+
+maps to:
+
+XXX FILL ME IN.

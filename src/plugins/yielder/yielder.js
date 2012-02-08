@@ -9,6 +9,13 @@ var log = (typeof console !== "undefined") && console.log || print;
 
 // converts functions containing yield/yield() to generators.
 Shaper("yielder", function(root) {
+    var gensym = (function(){
+        var i = 0;
+        return function(base) {
+            base = base || 'tmp';
+            return '$'+base+'$'+(i++);
+        };
+    })();
 
     function funcBodyStart(body, start_src) {
         start_src = start_src || '{';
@@ -296,6 +303,9 @@ Shaper("yielder", function(root) {
             Shaper.parse(String(this.stack.length));
         this.newInternalCont();
     };
+    YieldVisitor.prototype[tkn.FOR_IN] = function(node, src) {
+        console.assert(false, "should have been removed in previous pass");
+    };
     YieldVisitor.prototype[tkn.FOR] = function(child, src) {
         var setup, extraComment;
         // if there is setup, emit it first.
@@ -521,6 +531,23 @@ Shaper("yielder", function(root) {
                 // variable named arguments, etc.  no worries.
                 fn['arguments'] = true;
             }
+          if (node.type === tkn.FOR_IN) {
+              // convert to use iterator
+              var it = gensym('it'), e = gensym('e');
+              var newFor = Shaper.replace('for(var '+it+'=Iterator($,true);;){'+
+                                          'try { $='+it+'.next(); } '+
+                                          'catch ('+e+') { '+
+                                          'if ('+e+'===StopIteration) break; '+
+                                          'throw '+e+'; }'+
+                                          '$}',
+                                          node.object,
+                                          node.varDecl || node.iterator,
+                                          node.body);
+              newFor.labels = node.labels;
+              Shaper.cloneComments(newFor, node);
+              newFor.srcs[0] = node.srcs[0];
+              return ref.set(newFor);
+          }
         },
         post: function(node, ref) {
             var fn;
