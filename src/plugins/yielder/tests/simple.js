@@ -24,10 +24,14 @@ function bat(arr) {
     for (i=0; i<arr.length; i++) {
         if (test.apply(arr[i], arguments)) {
             try {
-                something(null);
+                something();
                 j = yield arr[i];
-                something(j);
+                if (j) {
+                  something(j);
+                  return;
+                }
             } catch (e) {
+                log(e);
                 delete arr[i];
             } finally {
                 baz(i);
@@ -35,4 +39,4 @@ function bat(arr) {
         }
     }
     return;
-};
+}

@@ -18,26 +18,32 @@ function bat(arr) {
   var i;
   // [0]
   for (i=0; i<arr.length; i++) {
-    // [1]
-    if (test.apply(arr[i], arguments)) {
-      // [2]
-      try {
-        something(null);
-        var j = yield arr[i];
-        // [3]
-        something(j);
-      } catch (e) {
-        // [4]
-        delete arr[i];
-      } finally {
-        // [5]
-        baz(i);
-      }
-      // [6]
-    }
-    // [7]
+     // [1]
+     if (test.apply(arr[i], arguments)) {
+       // [2]
+       try {
+         // [3]
+         something();
+         var j = /* [4] */yield arr[i];
+         if (j) {
+           // [5]
+           something(j);
+           return;
+         }
+         // [6]
+       } catch (e) {
+         // [7]
+         log(e);
+         delete arr[i];
+       } finally {
+         // [7b] // XXX
+         baz(i);
+       }
+       // [8]
+     }
+     // [9]
   }
-  // [8]
+  // [10]
   return;
 }
 
@@ -46,65 +52,86 @@ function bat(arr) {
 function bat(arr) {
   var $arguments = arguments; // necessary because original uses 'arguments'
   var $block = {};            // necessary because original has catch
-  var i, j; // hoisted
+  var i, j;
   return new Generator(this, [
-    function() { // [0] (external, first)
-      if (arguments[0]) { throw arguments[0]; }
-      i = 0;
-      return 1; // looping continuation
+    function() { // [0] (external, but first: don't need to check arguments[0])
+       i = 0;
+       return 1; // looping continuation
     },
     function() { // [1] (internal)
-      // internal looping continuation, don't need to check arguments[0] for ex
-      // "if (!(i < arr.length)) break;"
-      if (i >= arr.length) { return 8; /* looping continuation, after loop */}
-      if (test.apply(arr[i], $arguments)) {
-        return 2;
-      }
-      return 7;
+       // internal looping continuation, don't need to check arguments[0] for ex
+       // "if (!(i < arr.length)) break;"
+       if (i >= arr.length) { return 10; /* looping continuation, after loop */ }
+       if (test.apply(arr[i], $arguments)) {
+           return 2;
+       }
+       return 9;
     },
     function() { // [2] (internal)
-      try {
-        something(null);
-        return { cont: 3, ret: arr[i] };
-      } catch (e) {
-        return { cont: 4, ex: e, again: true; };
-      }
+       return 3; // top of try
     },
-    function() { // [3] (external)
+    function() { // [3] (internal)
+       try {
+         something();
+         return { cont: 4, ret: arr[i] }; // yield
+       } catch (e) {
+         if (e===StopIteration) { throw e; } // XXX
+         return { cont: 7, ex: e, again: true; };
+       }
+    },
+    function() { // [4] (external)
       try {
         // external continuation, need to check arguments[0]
         if (arguments[0]) { throw arguments[0]; }
         j = arguments[1];
-        something(j);
-        return 5; // finally
+        if (j) return 5;
+        return 6;
       } catch (e) {
         // don't allow catch of StopIteration
-        if (e===StopIteration) { throw e; }
-        return { cont: 4, ex: e, again: true };
+        if (e===StopIteration) { throw e; } // XXX
+        return { cont: 7, ex: e, again: true };
       }
     },
-    function() { // [4] (internal, catch(e))
-      // note that e has block-level scope.  Requires an environment hack
-      $block = Object.create($block);
-      $block.e = arguments[0];
-      delete arr[i];
-      $block = Object.getPrototypeOf($block);
-      return 5; // finally
-    },
     function() { // [5] (internal)
-      baz(i);
-      return 6; // after try
+      try {
+        something(j);
+        throw StopIteration; // return // XXX
+      } catch (e) {
+        if (e===StopIteration) { throw e; }
+        return { cont:7, ex:e, again:true };
+      }
     },
     function() { // [6] (internal)
-      return 7; // after if
+      try {
+        return 8;
+      } catch (e) {
+        if (e===StopIteration) { throw e; }
+        return { cont:7, ex:e, again:true };
+      }
     },
-    function() { // [7] (internal)
+    function() { // [7] (internal, catch(e))
+      // note that e has block-level scope.  Requires an environment hack
+      $block = Object.create($block);
+      $block.$e = arguments[0];
+      log($block.$e);
+      delete arr[i];
+      $block = Object.getPrototypeOf($block);
+      return 8; // XXX no finally
+    },
+    function() { // [7b] (internal, finally) // XXX
+      baz(i);
+      return 8; // after try
+    },
+    function() { // [8] (internal)
+      return 9; // after if
+    },
+    function() { // [9] (internal)
       // implicit increment, belonging to for loop
       i++;
       return 1; // loop!
     },
-    function() { // [8] (internal)
-      throw StopIteration;
+    function() { // [10] (internal)
+      throw StopIteration; // XXX
     }
   ]);
 }
