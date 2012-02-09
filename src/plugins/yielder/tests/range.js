@@ -2,6 +2,7 @@ var log = (typeof console !== "undefined") && console.log || print;
 // adjust path to get generator.js
 require && require.paths && typeof __dirname !== "undefined" && require.paths.unshift(__dirname+"/..");
 Iterator = require('iterator.js');
+StopIteration = require('stopiteration.js');
 
 function range(start, end, step) {
     var i;
@@ -17,7 +18,6 @@ try {
     while (true)
         log(it.next());
 } catch (e) {
-    var StopIteration = require('generator.js').StopIteration;
     if (e!==StopIteration) { throw e; }
 }
 
@@ -28,7 +28,6 @@ foo: for (var n in range(5, 0, -1)) {
 }
 
 log('for...in w/ Iterator');
-var Iterator = require('iterator.js');
 var nn;
 bar: for (nn in Iterator(range(0, 3, 2))) {
     log(nn);
