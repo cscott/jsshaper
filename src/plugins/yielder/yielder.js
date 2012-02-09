@@ -147,15 +147,18 @@ Shaper("yielder", function(root) {
         },
         // slightly ugly way to remove tokens from srcs
         removeTokens: function(src, tokens) {
+            return this.splitTokens.apply(this, arguments).join('');
+        },
+        splitTokens: function(src, token) {
             var t = new Narcissus.lexer.Tokenizer(src);
-            var i, tt, r='', start=0;
+            var i, tt, r=[], start=0;
             for (i=1; i<arguments.length; i++) {
                 tt = t.mustMatch(arguments[i]);
                 if (arguments[i]===tkn.END) { continue; }
-                r += src.substring(start, tt.start);
+                r.push(src.substring(start, tt.start));
                 start = tt.end;
             }
-            r += src.substring(start);
+            r.push(src.substring(start));
             return r;
         },
 
@@ -362,29 +365,28 @@ Shaper("yielder", function(root) {
         console.assert(false, "should have been removed in previous pass");
     };
     YieldVisitor.prototype[tkn.FOR] = function(child, src) {
-        var setup, extraComment;
+        var setup;
         // if there is setup, emit it first.
         if (child.setup) {
             child.setup = Shaper.traverse(child.setup, this,
                                           new Ref(child, 'setup'));
             setup = Shaper.replace('$;', child.setup);
-            extraComment = child.srcs[0]+';;)';
         } else {
             setup = Shaper.parse(';');
-            extraComment = child.srcs[0];
-            if (child.condition) {
-                extraComment += ';)';
-            } else if (child.update) {
-                extraComment += ')';
-            }
         }
+        this.add(setup, '');
 
-        this.add(setup);
         // fixup comments
-        setup.leadingComment = child.leadingComment || '';
-        setup.leadingComment += this.removeTokens(extraComment,
-            tkn.FOR, tkn.LEFT_PAREN, tkn.SEMICOLON,
-            tkn.SEMICOLON, tkn.RIGHT_PAREN, tkn.END);
+        var extraComment = child.srcs.slice(
+            0, 1+(child.setup?1:0)+(child.condition?1:0)+(child.update?1:0)).
+            join('');
+        extraComment = this.removeTokens(extraComment, tkn.FOR, tkn.LEFT_PAREN);
+        var split = this.splitTokens(extraComment, tkn.SEMICOLON,
+                                     tkn.SEMICOLON, tkn.RIGHT_PAREN,
+                                     tkn.END);
+        setup.leadingComment = (child.leadingComment || '') + split[0] +
+            (setup.leadingComment || '');
+        setup.trailingComment = (setup.trailingComment||'') + split[1];
 
         // now proceed like a while loop
         child.condition = Shaper.traverse(child.condition, this,
@@ -398,10 +400,11 @@ Shaper("yielder", function(root) {
         loopCheck.condition.children[0].children[0] = child.condition ||
             Shaper.parse('true');
         loopCheck.thenPart = this.returnStmt(-1);
+        loopCheck.thenPart.trailingComment = split[2] + split[3];
         this.add(loopCheck, '');
 
         // loop body
-        this.visit(child.body, '');
+        this.visit(child.body, src);
 
         // loop update
         if (this.canFallThrough) {
@@ -430,12 +433,12 @@ Shaper("yielder", function(root) {
     YieldVisitor.prototype[tkn.IF] = function(child, src) {
         child.condition = Shaper.traverse(child.condition, this,
                                           new Ref(child, 'condition'));
-        this.add(child, src);
+        this.add(child, '');
         this.canFallThrough = false; // both sides of IF will get returns
 
         var thenPart = this.stack.length;
         this.newInternalCont();
-        this.visit(child.thenPart, '');
+        this.visit(child.thenPart, child.elsePart ? '' : src);
         var thenPlace = this.canFallThrough ?
             this.addReturn(this.stack.length) : null /*optimization*/;
         // replace original thenPart with branch to continuation
@@ -444,7 +447,7 @@ Shaper("yielder", function(root) {
         if (child.elsePart) {
             var elsePart = this.stack.length;
             this.newInternalCont();
-            this.visit(child.elsePart, '');
+            this.visit(child.elsePart, src);
             if (this.canFallThrough) {
                 this.addReturn(this.stack.length);
             }
@@ -618,6 +621,12 @@ Shaper("yielder", function(root) {
               Shaper.cloneComments(newFor, node);
               newFor.srcs[0] = node.srcs[0];
               newFor.formerly = node; // for matching up break/continue
+              // looks better if we move the trailing comment from the old body
+              // to the new body
+              var trailing = node.body.trailingComment || '';
+              delete node.body.trailingComment;
+              newFor.body.trailingComment = trailing +
+                  (newFor.body.trailingComment || '');
               return ref.set(newFor);
           }
         },

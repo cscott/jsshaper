@@ -55,9 +55,9 @@ var foo = function(a,b) {
 function bat(arr) {
     var i, j;
 
-    for (i=0; i<arr.length; i++) {
-        if (test.apply(arr[i], arguments)) {
-            try {
+    for (i=0; i<arr.length; i++)/*y*/{/*z*/
+        /*0*/   if/*A*/(/*B*/test.apply(arr[i], arguments)/*C*/)/*a*/{/*b*/
+/*1*/       try {
                 something();
                 j = yield arr[i];
                 if (j) { return; }
@@ -67,8 +67,8 @@ function bat(arr) {
             } finally {
                 baz(i);
             }
-        }
-    }
+   }/*d*/
+/*q*/}
     return;
 }
 
@@ -99,3 +99,10 @@ function labels() {
     for (;;) /*o*/break/*p*/;/*q*/
     /*r*/ yield;
 }
+
+Number.prototype.__iterator__ = function() {
+    for ( var i = 0;
+          i < this;
+          i++ )
+        yield i;/*b*/
+};
