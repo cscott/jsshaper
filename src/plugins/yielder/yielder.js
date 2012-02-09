@@ -26,6 +26,9 @@ Shaper("yielder", function(root) {
         body.children.push(stmt);
         body.srcs.push(src);
     }
+    function funcBodyAddComment(body, comment) {
+        body.srcs[body.srcs.length-1] += comment;
+    }
     function funcBodyFinish(body, close_src) {
         close_src = close_src || '}';
         body.srcs[body.srcs.length-1] += close_src;
@@ -406,7 +409,12 @@ Shaper("yielder", function(root) {
             Shaper.parse('true');
         loopCheck.thenPart = this.returnStmt(-1);
         loopCheck.thenPart.trailingComment = split[2] + split[3];
-        this.add(loopCheck, '');
+        if (child.condition) {
+            this.add(loopCheck, '');
+        } else {
+            funcBodyAddComment(this.top().body,
+                               loopCheck.thenPart.trailingComment);
+        }
 
         // loop body
         this.visit(child.body, src);
