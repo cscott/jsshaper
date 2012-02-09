@@ -34,15 +34,14 @@ Shaper("yielder", function(root) {
     function YieldVisitor() {
         this.stack = [null];
         this.tryStack = [];
+        this.breakFixup = [];
+        this.continueFixup = [];
+        this.newExternalCont();
     }
     YieldVisitor.prototype = {
         top: function() { return this.stack[this.stack.length-1]; },
         add: function(child, src) {
             var top = this.top();
-            if (!top) {
-                this.newExternalCont();
-                top = this.top();
-            }
             funcBodyAdd(top.body, child, src);
         },
         returnStmt: function(val) {
@@ -59,7 +58,7 @@ Shaper("yielder", function(root) {
         },
         addReturn: function(where) {
             if (!this.canFallThrough) {
-                log("Adding unreachable return");
+                log("// Adding unreachable return");
             }
             var returnStmt = this.returnStmt(where);
             this.add(returnStmt, '');
@@ -149,14 +148,12 @@ Shaper("yielder", function(root) {
         // slightly ugly way to remove tokens from srcs
         removeTokens: function(src, tokens) {
             var t = new Narcissus.lexer.Tokenizer(src);
-            var i;
+            var i, tt, r='', start=0;
             for (i=1; i<arguments.length; i++) {
-                t.mustMatch(arguments[i]);
-            }
-            var r = '', start = 0;
-            for (i=1; i<t.tokens.length; i++) {
-                r += src.substring(start, t.tokens[i].start);
-                start = t.tokens[i].end;
+                tt = t.mustMatch(arguments[i]);
+                if (arguments[i]===tkn.END) { continue; }
+                r += src.substring(start, tt.start);
+                start = tt.end;
             }
             r += src.substring(start);
             return r;
@@ -204,16 +201,37 @@ Shaper("yielder", function(root) {
                     }
                 }
             }
+            if (node.type === tkn.BREAK ||
+                node.type === tkn.CONTINUE) {
+                var r = this.returnStmt(-1).expression;// strip semicolon
+                var fixup = (node.type===tkn.BREAK) ?
+                    this.breakFixup : this.continueFixup;
+                fixup.push({ret:r, target:node.target});
+                // tweak comments.
+                Shaper.cloneComments(r, node);
+                if (node.label) {
+                    var extra = this.removeTokens(node.srcs[0], node.type,
+                                                  tkn.IDENTIFIER, tkn.END);
+                    r.srcs[0]+=extra;
+                }
+                this.canFallThrough = false;
+                return ref.set(r);
+            }
             if (node.type === tkn.RETURN) {
                 this.canFallThrough = false;
                 return ref.set(Shaper.parse('throw StopIteration'));
             }
             if (node.type === tkn.YIELD) {
-                var value = Shaper.traverse(node.value, this,
+                var value;
+                if (node.value) {
+                    value = Shaper.traverse(node.value, this,
                                             new Ref(node, 'value'));
+                } else {
+                    value = Shaper.parse("void(0)");// 'undefined'
+                }
                 var rval = Shaper.replace('_={cont:'+this.stack.length+
                                           ',ret:$}', value).children[1];
-                var r = this.addReturn(rval);
+                this.addReturn(rval);
                 this.newExternalCont();
                 // XXX this doesn't work for foo((yield a), (yield b))
                 //     or (yield a) + (yield b), etc.
@@ -252,6 +270,36 @@ Shaper("yielder", function(root) {
         // visit the statements, in turn.
         this.visitBlock(node.children, new_srcs);
     };
+    YieldVisitor.prototype[tkn.LABEL] = function(node, src) {
+        // transfer comments/whitespace around label
+        var leading = (node.leadingComment || '') +
+            (node._label.trailingComment || '');
+        node.statement.leadingComment = leading +
+            (node.statement.leadingComment || '');
+
+        var this_target = node.statement;
+        if (this_target.type===tkn.SEMICOLON) {
+            this_target = this_target.expression;
+        }
+        this.visit(node.statement, src); // may mutate node.statement
+
+        var labelEnd = this.stack.length;
+        if (this.canFallThrough) {
+            this.addReturn(labelEnd);
+        }
+        this.newInternalCont();
+        this.fixupJumps(this.breakFixup, this_target, labelEnd);
+    };
+    YieldVisitor.prototype.fixupJumps = function(fixups, this_target, labelEnd) {
+        // fixup all break statements targetting this.
+        for (var i=fixups.length-1; i>=0; i--) {
+            var bf = fixups[i];
+            if (bf.target === this_target) {
+                fixups.splice(i, 1);
+                bf.ret.value = Shaper.parse(String(labelEnd));
+            }
+        }
+    };
     YieldVisitor.prototype[tkn.DO] = function(child, src) {
         child.condition = Shaper.traverse(child.condition, this,
                                           new Ref(child, 'condition'));
@@ -260,6 +308,11 @@ Shaper("yielder", function(root) {
 
         this.newInternalCont();
         this.visit(child.body, '');
+        var loopContinue = this.stack.length;
+        if (this.canFallThrough) {
+            this.addReturn(loopContinue);
+        }
+        this.newInternalCont();
 
         // bottom of loop: check the condition.
         var loopCheck = Shaper.parse("if ($) $");
@@ -269,11 +322,11 @@ Shaper("yielder", function(root) {
         Shaper.cloneComments(ret, child);
         loopCheck.srcs[0] = child.srcs[1].replace(/^while/, 'if');
         loopCheck.thenPart.srcs[1] = this.removeTokens(src, tkn.RIGHT_PAREN);
+        this.add(loopCheck, '');
+        this.addReturn(this.stack.length);
 
-        if (this.canFallThrough) {
-            this.add(loopCheck, '');
-            this.addReturn(this.stack.length);
-        }
+        this.fixupJumps(this.breakFixup, child, this.stack.length);
+        this.fixupJumps(this.continueFixup, child, loopContinue);
         this.newInternalCont();
     };
     YieldVisitor.prototype[tkn.WHILE] = function(child, src) {
@@ -301,6 +354,8 @@ Shaper("yielder", function(root) {
         // fixup loop check
         loopCheck.thenPart.expression.value =
             Shaper.parse(String(this.stack.length));
+        this.fixupJumps(this.breakFixup, child, this.stack.length);
+        this.fixupJumps(this.continueFixup, child, loopStart);
         this.newInternalCont();
     };
     YieldVisitor.prototype[tkn.FOR_IN] = function(node, src) {
@@ -313,16 +368,23 @@ Shaper("yielder", function(root) {
             child.setup = Shaper.traverse(child.setup, this,
                                           new Ref(child, 'setup'));
             setup = Shaper.replace('$;', child.setup);
-            extraComment = child.srcs[0]+';';
+            extraComment = child.srcs[0]+';;)';
         } else {
             setup = Shaper.parse(';');
             extraComment = child.srcs[0];
+            if (child.condition) {
+                extraComment += ';)';
+            } else if (child.update) {
+                extraComment += ')';
+            }
         }
+
         this.add(setup);
         // fixup comments
         setup.leadingComment = child.leadingComment || '';
-        setup.leadingComment += this.removeTokens(
-            extraComment, tkn.FOR, tkn.LEFT_PAREN, tkn.SEMICOLON, tkn.END);
+        setup.leadingComment += this.removeTokens(extraComment,
+            tkn.FOR, tkn.LEFT_PAREN, tkn.SEMICOLON,
+            tkn.SEMICOLON, tkn.RIGHT_PAREN, tkn.END);
 
         // now proceed like a while loop
         child.condition = Shaper.traverse(child.condition, this,
@@ -333,7 +395,8 @@ Shaper("yielder", function(root) {
 
         // top of loop: check the condition.
         var loopCheck = Shaper.parse("if (!($)) $");
-        loopCheck.condition.children[0].children[0] = child.condition;
+        loopCheck.condition.children[0].children[0] = child.condition ||
+            Shaper.parse('true');
         loopCheck.thenPart = this.returnStmt(-1);
         this.add(loopCheck, '');
 
@@ -349,11 +412,19 @@ Shaper("yielder", function(root) {
                 this.add(update);
             }
             this.addReturn(loopStart);
+        } else if (child.update) {
+            // XXX transfer comments from child.update
         }
 
         // fixup loop check
         loopCheck.thenPart.expression.value =
             Shaper.parse(String(this.stack.length));
+        this.fixupJumps(this.breakFixup, child, this.stack.length);
+        this.fixupJumps(this.continueFixup, child, loopStart);
+        if (child.formerly) { // handle converted for-in loops
+            this.fixupJumps(this.breakFixup, child.formerly, this.stack.length);
+            this.fixupJumps(this.continueFixup, child.formerly, loopStart);
+        }
         this.newInternalCont();
     };
     YieldVisitor.prototype[tkn.IF] = function(child, src) {
@@ -546,6 +617,7 @@ Shaper("yielder", function(root) {
               newFor.labels = node.labels;
               Shaper.cloneComments(newFor, node);
               newFor.srcs[0] = node.srcs[0];
+              newFor.formerly = node; // for matching up break/continue
               return ref.set(newFor);
           }
         },

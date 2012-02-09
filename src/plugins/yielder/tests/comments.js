@@ -92,3 +92,10 @@ function forin(o) {
     /*a*/for/*b*/(/*c*/p/*d*/in/*e*/o/*f*/)/*g*/{/*h*/log(p);/*i*/}/*j*/
     /*k*/for/*l*/(/*m*/var/*n*/pp/*o*/in/*p*/o/*q*/)/*r*/{/*s*/log(pp);/*t*/}/*u*/
 }
+
+function labels() {
+    /*a*/ b/*b*/:/*c*/break/*d*/b/*e*/;/*f*/
+    /*g*/ f/*h*/:/*i*/for(;;){/*j*/break/*k*/f/*l*/;/*m*/}/*n*/
+    for (;;) /*o*/break/*p*/;/*q*/
+    /*r*/ yield;
+}

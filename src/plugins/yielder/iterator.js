@@ -7,7 +7,7 @@ Iterator = function(o, keysOnly) {
   if (o===undef || o===null) {
     throw TypeError(o+" has no properties");
   }
-  if ('__iterator__' in o) {
+  if (typeof(o.__iterator__)==='function') {
     it = o.__iterator__();
     if (this instanceof Iterator) {
       this.next = function() { return it.next(); };
