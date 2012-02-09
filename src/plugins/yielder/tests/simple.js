@@ -40,3 +40,7 @@ function bat(arr) {
     }
     return;
 }
+function props(obj) {
+    for (var prop in obj)
+        yield prop;
+}

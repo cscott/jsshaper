@@ -246,10 +246,60 @@ while(true){
 
 for example,
 
-for (prop in obj) {
-  yield prop;
+function props(obj) {
+    for (prop in obj) {
+        yield prop;
+    }
 }
 
 maps to:
 
-XXX FILL ME IN.
+function props(obj) {
+    var $stop = {};
+    var $it$0, prop;
+    var $block = {};
+    var $catch$e;
+    return new Generator(this, $stop, [
+        function/*[0]*/() {
+            $it$0=Iterator(obj,true);
+            return 1;
+        },
+        function/*[1]*/() {
+            // "if (!true) ..." loop check omitted
+            return 2;
+        },
+        function/*[2]*/() {
+            try {
+                prop=$it$0.next();
+                return 6;
+            } catch ($e$1) {
+                if ($e$1===$stop) { throw $e$1; }
+                return { cont:3, ex:$e$1, again:true };
+            }
+        },
+        function/*[3]*/() {
+            $catch$e = arguments[0].ex;
+            if ($catch$e===StopIteration) return 4;
+            else return 5;
+        },
+        function/*[4]*/() {
+            return 8;
+        },
+        function/*[5]*/() {
+            throw $catch$e;
+        },
+        function/*[6]*/() {
+            return {cont:7,ret:prop};
+        },
+        function/*[7]*/() {
+            if (arguments[0]) {
+                throw arguments[0].ex;
+            }
+            arguments[1];
+            return 1;
+        },
+        function/*[8]*/() {
+            throw $stop;
+        }
+    ]);
+}
