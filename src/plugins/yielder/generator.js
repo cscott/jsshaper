@@ -32,10 +32,7 @@ Generator.prototype = {
             // note that catch clauses have to be modified to ignore StopIteration
             this['throw'].call(this, this._cont_stop);
         } catch (e) {
-            // slight difference from spec: only ignores *our* StopIteration,
-            // not all StopIterations (ie, 'finally { throw StopIteration }'
-            // will still throw)
-            if (e!==this._cont_stop) { throw e; }
+            if (e!==StopIteration) { throw e; }
         } finally {
             // should be impossible to catch this._cont_stop, so this._send
             // should have already closed the generator.
