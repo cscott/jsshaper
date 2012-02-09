@@ -169,43 +169,11 @@ Shaper("yielder", function(root) {
         pre: function(node, ref) {
             if (node.type === tkn.FUNCTION) {
                 // skip nested functions.
-                // XXX this means that references to block-scoped catch
-                //     variables in nested functions will be wrong, ie:
-                //     try {
-                //       ...
-                //     } catch (e) {
-                //       return function() { return e; }
-                //     }
-                //     We should really do a much-more limited transformation
-                //     on nested functions to catch this case, being careful
-                //     to let function-scoped variables properly overshadow
-                //     the block scoped variable, ie:
-                //     try {
-                //       ...
-                //     } catch (e) {
-                //       return function(e) { return e; }
-                //       // or function() { var e; ... }
-                //     }
                 return "break";
             }
             if (node.type === tkn.VAR) {
                 node.srcs[0] = this.removeTokens(node.srcs[0], tkn.VAR);
                 node.type = tkn.COMMA;
-            }
-            if (node.type === tkn.IDENTIFIER) {
-                if (node.value === 'arguments') {
-                    Shaper.renameIdentifier(node, '$'+node.value);
-                } else {
-                    // is this an identifier on the try stack?
-                    for (var i=this.tryStack.length-1; i>=0; i--) {
-                        var t = this.tryStack[i];
-                        if (t.inCatch && t.varName === node.value) {
-                            var nn = Shaper.parse('$block.$'+node.value);
-                            Shaper.cloneComments(nn, node);
-                            return ref.set(nn);
-                        }
-                    }
-                }
             }
             if (node.type === tkn.BREAK ||
                 node.type === tkn.CONTINUE) {
@@ -489,7 +457,7 @@ Shaper("yielder", function(root) {
         }
         for (i=0; i<node.catchClauses.length; i++) {
             c = node.catchClauses[i];
-            this.tryStack.push({varName:c.varName, fixups:[], inCatch:false});
+            this.tryStack.push({varName:c.yieldVarName, fixups:[], inCatch:false});
         }
 
         this.newInternalCont();
@@ -506,10 +474,9 @@ Shaper("yielder", function(root) {
                 c.fixups[j].set(Shaper.parse(String(catchStart)));
             }
             this.newInternalCont();
-            // set up scope
-            this.add(Shaper.parse('$block = Object.create($block);'), '');
+            // assign thrown exception to (renamed) variable in catch
             var cc = node.catchClauses[i];
-            var s = Shaper.parse('$block.$'+cc.varName+' = arguments[0].ex;');
+            var s = Shaper.parse(cc.yieldVarName+' = arguments[0].ex;');
             Shaper.cloneComments(s, cc._name);
             var extra = (cc.leadingComment||'') +
                 this.removeTokens(cc.srcs[0], tkn.CATCH, tkn.LEFT_PAREN);
@@ -521,7 +488,8 @@ Shaper("yielder", function(root) {
             // XXX if we leave this block via exception we need to clean up
             //     the block scope
             if (this.canFallThrough) {
-                this.add(Shaper.parse('$block = Object.getPrototypeOf($block);'), '');
+                // release the reference to the caught exception
+                this.add(Shaper.parse(cc.yieldVarName+'=null;'), '');
                 finallyFixups.push(this.addReturn(-1));
             }
             this.tryStack.pop();
@@ -536,7 +504,7 @@ Shaper("yielder", function(root) {
         }
     };
 
-    function alterFunc(node, props, ref) {
+    function rewriteGeneratorFunc(node, props, ref) {
         var stmts = [];
         var i;
         // export the Generator and StopIteration
@@ -547,9 +515,6 @@ Shaper("yielder", function(root) {
         }
         if (props['arguments']) {
             stmts.push(Shaper.parse('var $arguments = arguments;'));
-        }
-        if (props['catch']) {
-            stmts.push(Shaper.parse('var $block = {};'));
         }
         var yv = new YieldVisitor();
         console.assert(node.body.children.length > 0);
@@ -585,14 +550,16 @@ Shaper("yielder", function(root) {
 
     // find functions containing 'yield' and take note of uses of
     // 'arguments' and 'catch' as well.
-    var fns = [{fake:true,vars:[]}];
-    return Shaper.traverse(root, {
+    var yieldfns = [];
+    root = Shaper.traverse(root, {
+        fns: [{fake:true,vars:[],caught:[]}],
         pre: function(node, ref) {
             if (node.type === tkn.FUNCTION) {
-                fns.push({node: node, vars: [],
-                          'yield': false, 'arguments': false, 'catch': false});
+                this.fns.push({node: node, ref: ref, vars: [], caught: [],
+                               'yield': false, 'arguments': false,
+                               'catch': false, 'finally': false});
             }
-            var fn = fns[fns.length-1];
+            var fn = this.fns[this.fns.length-1];
             if (node.type === tkn.YIELD) {
                 if (fn.fake) {
                     Shaper.error(node, "yield outside function");
@@ -612,6 +579,10 @@ Shaper("yielder", function(root) {
             }
             if (node.type === tkn.CATCH) {
                 fn['catch'] = true;
+                fn.caught.push(node.varName);
+            }
+            if (node.type === tkn.FINALLY) {
+                fn['finally'] = true;
             }
             if (node.type === tkn.IDENTIFIER && node.value === 'arguments') {
                 // a bit conservative:: you might have defined your own
@@ -646,12 +617,96 @@ Shaper("yielder", function(root) {
         post: function(node, ref) {
             var fn;
             if (node.type === tkn.FUNCTION) {
-                fn = fns.pop();
+                fn = this.fns.pop();
+                fn.node.yield_info = fn;
                 if (fn['yield']) {
-                    return alterFunc(node, fn, ref);
+                    yieldfns.push(fn);
                 }
             }
-            return node;
         }
     });
+    // rewrite catch variables and 'arguments'
+    root = Shaper.traverse(root, {
+        func_stack: [{yield_info:{}}],
+        varenv: {
+            env: Object.create(null),
+            push: function() { this.env = Object.create(this.env); },
+            pop: function() { this.env = Object.getPrototypeOf(this.env); },
+            remove: function(v) { this.env[v+'$'] = false; },
+            put: function(v, nv) { this.env[v+'$'] = nv; },
+            has: function(v) { return !!this.env[v+'$']; },
+            get: function(v) { return this.env[v+'$']; }
+        },
+        current_func: function() {
+            return this.func_stack[this.func_stack.length-1];
+        },
+        pre: function(node, ref) {
+            if (node.type===tkn.FUNCTION) {
+                this.func_stack.push(node);
+                // remove mappings for 'var' and function parameters
+                this.varenv.push();
+                // var-bound variables
+                var v = node.yield_info.vars, i;
+                for (i=0; i<v.length; i++) {
+                    this.varenv.remove(v[i]);
+                }
+                // function parameters
+                v = node.params;
+                for (i=0; i<v.length; i++) {
+                    this.varenv.remove(v[i]);
+                }
+                // if this is a generator, add new name for 'arguments'
+                if (node.yield_info['yield']) {
+                    this.varenv.put('arguments', '$arguments');
+                } else {
+                    this.varenv.remove('arguments');
+                }
+            }
+            if (node.type===tkn.DOT) {
+                // only traverse 1st child; second is not an expression
+                Shaper.traverse(node.children[0], this,
+                                new Ref(node, 'children', 0));
+                return "break";
+            }
+            if (node.type===tkn.PROPERTY_INIT) {
+                // only traverse 2nd child; first is not an expression
+                Shaper.traverse(node.children[1], this,
+                                new Ref(node, 'children', 1));
+                return "break";
+            }
+            if (node.type===tkn.IDENTIFIER) {
+                if (this.varenv.has(node.value)) {
+                    Shaper.renameIdentifier(node, this.varenv.get(node.value)); 
+                }
+            }
+            if (node.type===tkn.CATCH) {
+                this.varenv.push();
+                if (this.current_func().yield_info['yield']) {
+                    // catch inside a generator!
+                    // add this to the environment
+                    node.yieldVarName = gensym(node.varName);
+                    this.varenv.put(node.varName, node.yieldVarName);
+                    this.current_func().yield_info.vars.push(node.yieldVarName);
+                } else if (this.varenv.has(node.varName)) {
+                    // this catch shadows a previously-caught variable;
+                    // remove it from the environment.
+                    this.varenv.remove(node.varName);
+                }
+            }
+        },
+        post: function(node, ref) {
+            if (node.type===tkn.FUNCTION) {
+                this.func_stack.pop();
+            }
+            if (node.type===tkn.FUNCTION || node.type===tkn.CATCH) {
+                // pop caught variables off the scope.
+                this.varenv.pop();
+            }
+        }
+    });
+    // rewrite generator functions
+    for (var i=0; i<yieldfns.length; i++) {
+        rewriteGeneratorFunc(yieldfns[i].node, yieldfns[i], yieldfns[i].ref);
+    }
+    return root;
 });
