@@ -71,7 +71,7 @@ Shaper("yielder", function(root) {
                 this.stack.pop();
             } else {
                 if (this.canFallThrough) {
-                    this.add(Shaper.parse('throw StopIteration;'), '');
+                    this.add(Shaper.parse('throw $stop;'), '');
                 }
                 funcBodyFinish(top.body);
             }
@@ -105,7 +105,7 @@ Shaper("yielder", function(root) {
                 // fill out catch block
                 var c = tryBlock.catchClauses[0].block, s;
                 funcBodyStart(c);
-                s = Shaper.parse('if ('+v+'===StopIteration) { throw '+v+'; }');
+                s = Shaper.parse('if ('+v+'===$stop) { throw '+v+'; }');
                 funcBodyAdd(c, s, '');
                 s = Shaper.parse('_={ cont:$, ex:'+v+', again:true }').
                     children[1];
@@ -125,7 +125,7 @@ Shaper("yielder", function(root) {
             this.newInternalCont();
             // optimization: can't throw before generator has been started
             if (this.stack.length===1) { return; }
-            this.add(Shaper.parse('if (arguments[0]) { throw arguments[0]; }'),
+            this.add(Shaper.parse('if (arguments[0]) {throw arguments[0].ex;}'),
                      '');
         },
 
@@ -222,7 +222,12 @@ Shaper("yielder", function(root) {
             }
             if (node.type === tkn.RETURN) {
                 this.canFallThrough = false;
-                return ref.set(Shaper.parse('throw StopIteration'));
+                return ref.set(Shaper.parse('throw $stop'));
+            }
+            if (node.type === tkn.THROW) {
+                this.canFallThrough = false;
+                // no other modification needed
+                return;
             }
             if (node.type === tkn.YIELD) {
                 var value;
@@ -496,7 +501,7 @@ Shaper("yielder", function(root) {
             // set up scope
             this.add(Shaper.parse('$block = Object.create($block);'), '');
             var cc = node.catchClauses[i];
-            var s = Shaper.parse('$block.$'+cc.varName+' = arguments[0];');
+            var s = Shaper.parse('$block.$'+cc.varName+' = arguments[0].ex;');
             Shaper.cloneComments(s, cc._name);
             var extra = (cc.leadingComment||'') +
                 this.removeTokens(cc.srcs[0], tkn.CATCH, tkn.LEFT_PAREN);
@@ -528,7 +533,7 @@ Shaper("yielder", function(root) {
         var i;
         // export the Generator and StopIteration
         stmts.push(Shaper.parse('var $Generator = require("generator.js");'));
-        stmts.push(Shaper.parse('var StopIteration=$Generator.StopIteration;'));
+        stmts.push(Shaper.parse('var $stop = {};'));
         if (props.vars.length > 0) {
             stmts.push(Shaper.parse("var "+props.vars.join(',')+";"));
         }
@@ -556,7 +561,7 @@ Shaper("yielder", function(root) {
         // Note that we need to make a bogus function wrapper here or else
         // parse() will complain about the 'return outside of a function'
         var newBody = Shaper.replace(
-            'function _(){return new $Generator(this, $);}',
+            'function _(){return new $Generator(this, $stop, $);}',
             conts).body.children[0];
         stmts.push(newBody);
 

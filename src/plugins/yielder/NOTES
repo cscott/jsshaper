@@ -53,7 +53,8 @@ function bat(arr) {
   var $stop = {};
   var $arguments = arguments; // necessary because original uses 'arguments'
   var $catch$e;               // necessary because original has catch
-  var $finally;               // necessary because original has finally
+  var $finally$ex;            // necessary because original has finally
+  var $finally$fall;          // necessary because original has finally
   var i, j;
   return new Generator(this, $stop, [
     function() { // [0] (external, but first: don't need to check arguments[0])
@@ -87,7 +88,7 @@ function bat(arr) {
     function() { // [4] (external)
       try {
         // external continuation, need to check arguments[0]
-        if (arguments[0]) { throw arguments[0]; }
+        if (arguments[0]) { throw arguments[0].ex; }
         j = arguments[1];
         if (j) return 5;
         return 6;
@@ -176,7 +177,7 @@ Generator.prototype = {
     return this._send(null, val);
   },
   'throw': function(ex) {
-    return this._send(ex, null);
+    return this._send({ex:ex},null);
   },
   close: function() {
     if (this._closed) { return; }
@@ -200,8 +201,8 @@ Generator.prototype = {
     this._cont_next = null;
   },
   _send: function(exception, value) {
+    if (this._closed) { throw StopIteration; }
     try {
-      if (this._closed) { throw StopIteration; }
       var r;
       while (true) { // this lets us do a simpler CPS conversion of loops
         r = this._cont_next.call(this._cont_this, exception, value);
@@ -212,9 +213,7 @@ Generator.prototype = {
           this._cont_next = this._cont_array[r.cont];
           if (r.again) {
             value = r.fall; // fallthrough, for finally blocks
-            exception = r.ex;
-          } else if (r.ex) {
-            throw r.ex;
+            exception = r;  // r.ex contains exception; r is wrapper
           } else {
             return r.ret;
           }
