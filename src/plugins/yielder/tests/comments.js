@@ -1,3 +1,6 @@
+var log = (typeof console !== "undefined") && console.log || print;
+(typeof require !== 'undefined') && require('setup.js');
+
 function normal(a, b, c) {
     return a + b + c;
 }

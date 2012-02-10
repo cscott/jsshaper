@@ -42,6 +42,9 @@ Iterator.prototype = {
   __iterator__: function() { return this; }
 };
 
+if (typeof global !== "undefined") {
+    global.Iterator = Iterator;
+}
 if (typeof exports !== "undefined") {
     module.exports = Iterator;
 }

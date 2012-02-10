@@ -1,7 +1,5 @@
 var log = (typeof console !== "undefined") && console.log || print;
-// adjust path to get generator.js
-require && require.paths && typeof __dirname !== "undefined" && require.paths.unshift(__dirname+"/..");
-StopIteration = require('stopiteration.js');
+(typeof require !== 'undefined') && require('setup.js');
 
 // test variable renaming: proper scoping of variables named in catch blocks
 // (the only block-level scoping in javascript) and renaming of the

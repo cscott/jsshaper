@@ -10,6 +10,13 @@ check-%: tests/%.yielder.js
 	@node $< 2>&1 > tests/$*.actual
 	@-diff -u tests/$*.expected tests/$*.actual
 
+runrhino-%: tests/%.js
+	@rhino -version 180 $<
+
+checkrhino-%: tests/%.js
+	@-rhino -version 180 $< 2>&1 > tests/$*.rhino
+	@-diff -u tests/$*.expected tests/$*.rhino
+
 checklines-%: tests/%.yielder.js
 	@wc -l tests/$*.js | cut -f 1 -d ' ' > tmp1
 	@wc -l tests/$*.yielder.js | cut -f 1 -d ' ' > tmp2
@@ -20,6 +27,7 @@ checklines-%: tests/%.yielder.js
 
 test: $(patsubst tests/%.expected,check-%,$(wildcard tests/*.expected)) \
       $(patsubst tests/%.expected,checklines-%,$(wildcard tests/*.expected)) \
+      $(patsubst tests/%.expected,checkrhino-%,$(wildcard tests/*.expected)) \
 	checklines-comments checklines-simple
 
 .SECONDARY: # preserve generated *.yielder.js files

@@ -1,7 +1,5 @@
 var log = (typeof console !== "undefined") && console.log || print;
-// adjust path to get generator.js
-require && require.paths && typeof __dirname !== "undefined" && require.paths.unshift(__dirname+"/..");
-Iterator = require('iterator.js');
+(typeof require !== 'undefined') && require('setup.js');
 
 // Groovy iterator demo from: http://ejohn.org/blog/javascript-18-progress/
 

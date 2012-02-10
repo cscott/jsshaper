@@ -1,8 +1,5 @@
 var log = (typeof console !== "undefined") && console.log || print;
-// adjust path to get generator.js
-require && require.paths && typeof __dirname !== "undefined" && require.paths.unshift(__dirname+"/..");
-Iterator = require('iterator.js');
-StopIteration = require('stopiteration.js');
+(typeof require !== 'undefined') && require('setup.js');
 
 // Torture test: try to name real variables to conflict with automatically-generated symbols.
 // gensym to the rescue.

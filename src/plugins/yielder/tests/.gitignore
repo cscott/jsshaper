@@ -1,2 +1,3 @@
 *.yielder.js
 *.actual
+*.rhino
