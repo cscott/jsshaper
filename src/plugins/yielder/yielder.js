@@ -86,7 +86,7 @@ Shaper("yielder", function(root) {
         this.tryStack = [];
         this.breakFixup = [];
         this.continueFixup = [];
-        this.newExternalCont();
+        this.newInternalCont();
     }
     YieldVisitor.prototype = {
         top: function() { return this.stack[this.stack.length-1]; },
@@ -175,12 +175,11 @@ Shaper("yielder", function(root) {
             this.stack.push(new_top);
             this.canFallThrough = true;
         },
-        newExternalCont: function() {
+        newExternalCont: function(yieldVarName) {
             this.newInternalCont();
-            // optimization: can't throw before generator has been started
-            if (this.stack.length===1) { return; }
             this.add(Shaper.parse('if (arguments[0]) {throw arguments[0].ex;}'),
                      '');
+            this.add(Shaper.parse(yieldVarName+'=arguments[1];'), '');
         },
 
         visit: function(child, src) {
@@ -246,10 +245,8 @@ Shaper("yielder", function(root) {
                 var rval = Shaper.replace('_={cont:'+this.stack.length+
                                           ',ret:$}', value).children[1];
                 this.addReturn(rval);
-                this.newExternalCont();
-                // XXX this doesn't work for foo((yield a), (yield b))
-                //     or (yield a) + (yield b), etc.
-                ref.set(Shaper.parse('arguments[1]'));
+                this.newExternalCont(node.yieldVarName);
+                ref.set(Shaper.parse(node.yieldVarName));
                 return "break";
             }
         }
@@ -724,7 +721,7 @@ Shaper("yielder", function(root) {
           }
         }
     });
-    // rewrite catch variables and 'arguments'
+    // rewrite catch variables and 'arguments'; assign temps to 'yield's
     root = Shaper.traverse(root, {
         func_stack: [{yield_info:{}}],
         varenv: {
@@ -798,6 +795,10 @@ Shaper("yielder", function(root) {
                     this.current_func().yield_info.vars.push(
                         node.finallyVarName);
                 }
+            }
+            if (node.type===tkn.YIELD) {
+                node.yieldVarName = gensym('y');
+                this.current_func().yield_info.vars.push(node.yieldVarName);
             }
         },
         post: function(node, ref) {
