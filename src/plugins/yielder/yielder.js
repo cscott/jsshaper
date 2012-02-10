@@ -49,6 +49,25 @@ Shaper("yielder", function(root) {
     var removeTokens = function(src, tokens) {
         return splitTokens.apply(this, arguments).join('');
     };
+    var removeAllTokens = function(root) {
+        var r = [];
+        Shaper.traverse(root, {
+            pre: function(node, ref) {
+                if (node.leadingComment) {
+                    r.push(node.leadingComment);
+                }
+                // grab newlines from srcs array; they might be slightly
+                // misplaced (sigh)
+                r.push(node.srcs.join('').replace(/\S/g,''));
+            },
+            post: function(node, ref) {
+                if (node.trailingComment) {
+                    r.push(node.trailingComment);
+                }
+            }
+        });
+        return r.join('');
+    };
 
     function YieldVisitor() {
         this.stack = [null];
@@ -393,11 +412,12 @@ Shaper("yielder", function(root) {
                 child.update = Shaper.traverse(child.update, this,
                                                new Ref(child, 'update'));
                 var update = Shaper.replace('$;', child.update);
-                this.add(update);
+                this.add(update, '');
             }
             this.addReturn(loopStart);
         } else if (child.update) {
-            // XXX transfer comments from child.update
+            // transfer comments from child.update
+            this.addComment(removeAllTokens(child.update));
         }
 
         // fixup loop check
@@ -513,8 +533,9 @@ Shaper("yielder", function(root) {
 
             this.visit(cc.block, '');
 
-            // XXX if we leave this block via exception we need to clean up
-            //     the block scope
+            // XXX if we leave this block via exception it would be nice
+            //     to release the reference to the caught exception.
+
             if (this.canFallThrough) {
                 // release the reference to the caught exception
                 this.add(Shaper.parse(cc.yieldVarName+'=null;'), '');

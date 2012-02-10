@@ -97,6 +97,18 @@ function trytest2() {
 /*z*/}/*0*/
 }
 
+function forloop() {
+/*a*/    for/*b*/(/*c*/var/*d*/ i=0/*e*/;/*f*/ i<5/*g*/;/*h*/ i/*i*/
++=
+/*j*/
+1
+/*k*/
+)/*l*/ {/*m*/
+/*n*/        yield i;/*o*/
+/*p*/        return;/*q*/
+/*r*/    }/*s*/
+}
+
 function forin(o) {
     var p;
     /*a*/for/*b*/(/*c*/p/*d*/in/*e*/o/*f*/)/*g*/{/*h*/log(p);/*i*/}/*j*/
