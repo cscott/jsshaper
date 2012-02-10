@@ -34,6 +34,22 @@ Shaper("yielder", function(root) {
         body.srcs[body.srcs.length-1] += close_src;
     }
 
+    var splitTokens = function(src, token) {
+        var t = new Narcissus.lexer.Tokenizer(src);
+        var i, tt, r=[], start=0;
+        for (i=1; i<arguments.length; i++) {
+            tt = t.mustMatch(arguments[i]);
+            if (arguments[i]===tkn.END) { continue; }
+            r.push(src.substring(start, tt.start));
+            start = tt.end;
+        }
+        r.push(src.substring(start));
+        return r;
+    };
+    var removeTokens = function(src, tokens) {
+        return splitTokens.apply(this, arguments).join('');
+    };
+
     function YieldVisitor() {
         this.stack = [null];
         this.tryStack = [];
@@ -46,6 +62,10 @@ Shaper("yielder", function(root) {
         add: function(child, src) {
             var top = this.top();
             funcBodyAdd(top.body, child, src);
+        },
+        addComment: function(comment) {
+            var top = this.top();
+            funcBodyAddComment(top.body, comment);
         },
         returnStmt: function(val) {
             if (typeof val === 'number') {
@@ -108,15 +128,15 @@ Shaper("yielder", function(root) {
                 // fill out catch block
                 var c = tryBlock.catchClauses[0].block, s;
                 funcBodyStart(c);
-                s = Shaper.parse('if ('+v+'===$stop) { throw '+v+'; }');
-                funcBodyAdd(c, s, '');
+
+                // if exception caught, branch to catch or finally block
                 s = Shaper.parse('_={ cont:$, ex:'+v+', again:true }').
                     children[1];
                 // record fixup needed for catch block.
-                tb.fixups.push(new Ref(s, 'children', 0, 'children', 1));
+                tb.catchFixups.push({ref:new Ref(s, 'children', 0,
+                                                 'children', 1)});
                 s = this.returnStmt(s);
                 funcBodyAdd(c, s, '');
-                // XXX fix handling of finally blocks
                 funcBodyFinish(c);
             }
             funcBodyStart(new_top.body);
@@ -148,22 +168,6 @@ Shaper("yielder", function(root) {
                 this.visit(children[i], srcs[i]);
             }
         },
-        // slightly ugly way to remove tokens from srcs
-        removeTokens: function(src, tokens) {
-            return this.splitTokens.apply(this, arguments).join('');
-        },
-        splitTokens: function(src, token) {
-            var t = new Narcissus.lexer.Tokenizer(src);
-            var i, tt, r=[], start=0;
-            for (i=1; i<arguments.length; i++) {
-                tt = t.mustMatch(arguments[i]);
-                if (arguments[i]===tkn.END) { continue; }
-                r.push(src.substring(start, tt.start));
-                start = tt.end;
-            }
-            r.push(src.substring(start));
-            return r;
-        },
 
         // rewrite arguments, catch expressions, var nodes, etc.
         pre: function(node, ref) {
@@ -172,7 +176,7 @@ Shaper("yielder", function(root) {
                 return "break";
             }
             if (node.type === tkn.VAR) {
-                node.srcs[0] = this.removeTokens(node.srcs[0], tkn.VAR);
+                node.srcs[0] = removeTokens(node.srcs[0], tkn.VAR);
                 node.type = tkn.COMMA;
             }
             if (node.type === tkn.BREAK ||
@@ -180,12 +184,12 @@ Shaper("yielder", function(root) {
                 var r = this.returnStmt(-1).expression;// strip semicolon
                 var fixup = (node.type===tkn.BREAK) ?
                     this.breakFixup : this.continueFixup;
-                fixup.push({ret:r, target:node.target});
+                fixup.push({ref:new Ref(r, 'value'), target:node.target});
                 // tweak comments.
                 Shaper.cloneComments(r, node);
                 if (node.label) {
-                    var extra = this.removeTokens(node.srcs[0], node.type,
-                                                  tkn.IDENTIFIER, tkn.END);
+                    var extra = removeTokens(node.srcs[0], node.type,
+                                             tkn.IDENTIFIER, tkn.END);
                     r.srcs[0]+=extra;
                 }
                 this.canFallThrough = false;
@@ -221,8 +225,7 @@ Shaper("yielder", function(root) {
     };
     YieldVisitor.prototype[tkn.BLOCK] = function(node, src) {
         var leading = node.leadingComment || '';
-        leading += this.removeTokens(node.srcs[0],
-                                     tkn.LEFT_CURLY);
+        leading += removeTokens(node.srcs[0], tkn.LEFT_CURLY);
         var trailing = node.trailingComment || '';
         trailing += src;
 
@@ -230,7 +233,7 @@ Shaper("yielder", function(root) {
             // make a semicolon node, just to have a place to put the
             // comments.
             var semi = Shaper.parse(';');
-            semi.leadingComment = this.removeTokens(leading, tkn.RIGHT_CURLY);
+            semi.leadingComment = removeTokens(leading, tkn.RIGHT_CURLY);
             this.add(semi, trailing);
             return;
         }
@@ -242,7 +245,7 @@ Shaper("yielder", function(root) {
         // adjust comments.
         var new_srcs = node.srcs.slice(1);
         new_srcs[new_srcs.length-1] =
-            this.removeTokens(new_srcs[new_srcs.length-1], tkn.RIGHT_CURLY) +
+            removeTokens(new_srcs[new_srcs.length-1], tkn.RIGHT_CURLY) +
             trailing;
         node.children[0].leadingComment = leading +
             (node.children[0].leadingComment || '');
@@ -267,15 +270,15 @@ Shaper("yielder", function(root) {
             this.addReturn(labelEnd);
         }
         this.newInternalCont();
-        this.fixupJumps(this.breakFixup, this_target, labelEnd);
+        this.fixupJumps(this.breakFixup, labelEnd, this_target);
     };
-    YieldVisitor.prototype.fixupJumps = function(fixups, this_target, labelEnd) {
+    YieldVisitor.prototype.fixupJumps=function(fixups, labelEnd, this_target) {
         // fixup all break statements targetting this.
         for (var i=fixups.length-1; i>=0; i--) {
             var bf = fixups[i];
-            if (bf.target === this_target) {
+            if (arguments.length===2 || bf.target === this_target) {
                 fixups.splice(i, 1);
-                bf.ret.value = Shaper.parse(String(labelEnd));
+                bf.ref.set(Shaper.parse(String(labelEnd)));
             }
         }
     };
@@ -300,12 +303,12 @@ Shaper("yielder", function(root) {
         // transfer comments.
         Shaper.cloneComments(ret, child);
         loopCheck.srcs[0] = child.srcs[1].replace(/^while/, 'if');
-        loopCheck.thenPart.srcs[1] = this.removeTokens(src, tkn.RIGHT_PAREN);
+        loopCheck.thenPart.srcs[1] = removeTokens(src, tkn.RIGHT_PAREN);
         this.add(loopCheck, '');
         this.addReturn(this.stack.length);
 
-        this.fixupJumps(this.breakFixup, child, this.stack.length);
-        this.fixupJumps(this.continueFixup, child, loopContinue);
+        this.fixupJumps(this.breakFixup, this.stack.length, child);
+        this.fixupJumps(this.continueFixup, loopContinue, child);
         this.newInternalCont();
     };
     YieldVisitor.prototype[tkn.WHILE] = function(child, src) {
@@ -333,8 +336,8 @@ Shaper("yielder", function(root) {
         // fixup loop check
         loopCheck.thenPart.expression.value =
             Shaper.parse(String(this.stack.length));
-        this.fixupJumps(this.breakFixup, child, this.stack.length);
-        this.fixupJumps(this.continueFixup, child, loopStart);
+        this.fixupJumps(this.breakFixup, this.stack.length, child);
+        this.fixupJumps(this.continueFixup, loopStart, child);
         this.newInternalCont();
     };
     YieldVisitor.prototype[tkn.FOR_IN] = function(node, src) {
@@ -342,27 +345,25 @@ Shaper("yielder", function(root) {
     };
     YieldVisitor.prototype[tkn.FOR] = function(child, src) {
         var setup;
+
+        // fixup comments
+        var extraComment = child.leadingComment || '';
+        extraComment += child.srcs.slice(
+            0, 1+(child.setup?1:0)+(child.condition?1:0)+(child.update?1:0)).
+            join('');
+        extraComment = removeTokens(extraComment, tkn.FOR, tkn.LEFT_PAREN);
+        var split = splitTokens(extraComment, tkn.SEMICOLON,
+                                tkn.SEMICOLON, tkn.RIGHT_PAREN,
+                                tkn.END);
+        this.addComment(split[0]);
+
         // if there is setup, emit it first.
         if (child.setup) {
             child.setup = Shaper.traverse(child.setup, this,
                                           new Ref(child, 'setup'));
-            setup = Shaper.replace('$;', child.setup);
-        } else {
-            setup = Shaper.parse(';');
+            this.add(Shaper.replace('$;', child.setup), '');
         }
-        this.add(setup, '');
-
-        // fixup comments
-        var extraComment = child.srcs.slice(
-            0, 1+(child.setup?1:0)+(child.condition?1:0)+(child.update?1:0)).
-            join('');
-        extraComment = this.removeTokens(extraComment, tkn.FOR, tkn.LEFT_PAREN);
-        var split = this.splitTokens(extraComment, tkn.SEMICOLON,
-                                     tkn.SEMICOLON, tkn.RIGHT_PAREN,
-                                     tkn.END);
-        setup.leadingComment = (child.leadingComment || '') + split[0] +
-            (setup.leadingComment || '');
-        setup.trailingComment = (setup.trailingComment||'') + split[1];
+        this.addComment(split[1]);
 
         // now proceed like a while loop
         child.condition = Shaper.traverse(child.condition, this,
@@ -380,8 +381,7 @@ Shaper("yielder", function(root) {
         if (child.condition) {
             this.add(loopCheck, '');
         } else {
-            funcBodyAddComment(this.top().body,
-                               loopCheck.thenPart.trailingComment);
+            this.addComment(loopCheck.thenPart.trailingComment);
         }
 
         // loop body
@@ -403,11 +403,11 @@ Shaper("yielder", function(root) {
         // fixup loop check
         loopCheck.thenPart.expression.value =
             Shaper.parse(String(this.stack.length));
-        this.fixupJumps(this.breakFixup, child, this.stack.length);
-        this.fixupJumps(this.continueFixup, child, loopStart);
+        this.fixupJumps(this.breakFixup, this.stack.length, child);
+        this.fixupJumps(this.continueFixup, loopStart, child);
         if (child.formerly) { // handle converted for-in loops
-            this.fixupJumps(this.breakFixup, child.formerly, this.stack.length);
-            this.fixupJumps(this.continueFixup, child.formerly, loopStart);
+            this.fixupJumps(this.breakFixup, this.stack.length, child.formerly);
+            this.fixupJumps(this.continueFixup, loopStart, child.formerly);
         }
         this.newInternalCont();
     };
@@ -450,37 +450,65 @@ Shaper("yielder", function(root) {
         this.newInternalCont();
     };
     YieldVisitor.prototype[tkn.TRY] = function(node, src) {
-        var c,i,j;
+        var c,i,j,s;
         var r = this.addReturn(this.stack.length);
         if (node.leadingComment) {
             r.leadingComment = node.leadingComment;
         }
-        for (i=0; i<node.catchClauses.length; i++) {
+        var hasFinally = !!node.finallyBlock;
+        var finallyFixups = [];
+        var addFallThroughBranch;
+        if (hasFinally) {
+            this.tryStack.push({inCatch:false, isFinally:true,
+                                varName: node.finallyVarName,
+                                catchFixups: finallyFixups});
+            addFallThroughBranch = function() {
+                var r = Shaper.parse('_={ cont:$, fall:true, again:true }').
+                    children[1];
+                // record fixup
+                finallyFixups.push({ref:new Ref(r, 'children', 0,
+                                                'children', 1)});
+                this.addReturn(r);
+            }.bind(this);
+        } else {
+            addFallThroughBranch = function() {
+                var r = this.addReturn(-1);
+                // record fixup
+                finallyFixups.push({ref:new Ref(r, 'expression', 'value')});
+            }.bind(this);
+        }
+        for (i=node.catchClauses.length-1; i>=0; i--) {
             c = node.catchClauses[i];
-            this.tryStack.push({varName:c.yieldVarName, fixups:[], inCatch:false});
+            this.tryStack.push({varName:c.yieldVarName, inCatch:false,
+                                catchFixups: [], finallyFixups: finallyFixups});
         }
 
         this.newInternalCont();
-        this.visit(node.tryBlock, src); // XXX src should be used after finally
-        var finallyFixups = [];
-        finallyFixups.push(this.addReturn(-1));
+        this.visit(node.tryBlock, '');
+        if (this.canFallThrough) {
+            addFallThroughBranch();
+        }
 
         // catch blocks
         for (i=0; i<node.catchClauses.length; i++) {
             var catchStart = this.stack.length;
             c = this.tryStack[this.tryStack.length-1];
             c.inCatch = true;
-            for (j=0; j<c.fixups.length; j++) {
-                c.fixups[j].set(Shaper.parse(String(catchStart)));
-            }
+            this.fixupJumps(c.catchFixups, catchStart);
+
             this.newInternalCont();
             // assign thrown exception to (renamed) variable in catch
             var cc = node.catchClauses[i];
-            var s = Shaper.parse(cc.yieldVarName+' = arguments[0].ex;');
+            s = Shaper.parse(cc.yieldVarName+' = arguments[0].ex;');
             Shaper.cloneComments(s, cc._name);
             var extra = (cc.leadingComment||'') +
-                this.removeTokens(cc.srcs[0], tkn.CATCH, tkn.LEFT_PAREN);
+                removeTokens(cc.srcs[0], tkn.CATCH, tkn.LEFT_PAREN);
             s.leadingComment = extra + (s.leadingComment||'');
+            this.add(s, '');
+
+            // bail if this is a stopiteration exception!
+            s = Shaper.parse('if ('+cc.yieldVarName+'===$stop) '+
+                             '{ throw '+cc.yieldVarName+'; }');
             this.add(s, '');
 
             this.visit(cc.block, '');
@@ -490,18 +518,31 @@ Shaper("yielder", function(root) {
             if (this.canFallThrough) {
                 // release the reference to the caught exception
                 this.add(Shaper.parse(cc.yieldVarName+'=null;'), '');
-                finallyFixups.push(this.addReturn(-1));
+                addFallThroughBranch();
             }
             this.tryStack.pop();
         }
 
-        // after try / finally (XXX finally isn't really supported yet)
+        // after try / finally
         var finallyLabel = this.stack.length;
-        this.newInternalCont();
-        for (i=0; i<finallyFixups.length; i++) {
-            finallyFixups[i].expression.value =
-                Shaper.parse(String(finallyLabel));
+        this.fixupJumps(finallyFixups, finallyLabel);
+        if (hasFinally) {
+            c = this.tryStack.pop();
+            this.newInternalCont();
+            this.add(Shaper.parse(node.finallyVarName+' = arguments[0];'), '');
+
+            this.visit(node.finallyBlock, '');
+
+            if (this.canFallThrough) {
+                s = Shaper.parse('if (!'+node.finallyVarName+'.fall) '+
+                                 'throw '+node.finallyVarName+'.ex;');
+                this.add(s, '');
+                this.addReturn(this.stack.length); // fall through
+            }
         }
+
+        this.newInternalCont();
+        this.addComment(src);
     };
 
     function rewriteGeneratorFunc(node, props, ref) {
@@ -581,7 +622,7 @@ Shaper("yielder", function(root) {
                 fn['catch'] = true;
                 fn.caught.push(node.varName);
             }
-            if (node.type === tkn.FINALLY) {
+            if (node.type === tkn.TRY && node.finallyBlock) {
                 fn['finally'] = true;
             }
             if (node.type === tkn.IDENTIFIER && node.value === 'arguments') {
@@ -604,6 +645,11 @@ Shaper("yielder", function(root) {
               newFor.labels = node.labels;
               Shaper.cloneComments(newFor, node);
               newFor.srcs[0] = node.srcs[0];
+              newFor.srcs[1] =
+                  removeTokens(node.srcs[1], tkn.IN, tkn.END) +
+                  newFor.srcs[1] +
+                  removeTokens(node.srcs[2], tkn.RIGHT_PAREN, tkn.END);
+              newFor.srcs[2] = node.srcs[3];
               newFor.formerly = node; // for matching up break/continue
               // looks better if we move the trailing comment from the old body
               // to the new body
@@ -691,6 +737,13 @@ Shaper("yielder", function(root) {
                     // this catch shadows a previously-caught variable;
                     // remove it from the environment.
                     this.varenv.remove(node.varName);
+                }
+            }
+            if (node.type===tkn.TRY && node.finallyBlock) {
+                if (this.current_func().yield_info['yield']) {
+                    node.finallyVarName = gensym('finally');
+                    this.current_func().yield_info.vars.push(
+                        node.finallyVarName);
                 }
             }
         },

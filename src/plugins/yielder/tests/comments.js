@@ -87,6 +87,16 @@ function trytest() {
 /*t*/}/*u*/
 }
 
+function trytest2() {
+/*a*/try/*b*/{/*c*/
+/*d*/  foo/*e*/(/*f*/)/*g*/;/*h*/
+/*i*/}/*j*/catch/*k*/(/*l*/e/*m*/)/*n*/{/*o*/
+/*p*/   yield/*q*/e/*r*/;/*s*/
+/*t*/}/*u*/finally/*v*/{/*w*/
+/*x*/   log('f');/*y*/
+/*z*/}/*0*/
+}
+
 function forin(o) {
     var p;
     /*a*/for/*b*/(/*c*/p/*d*/in/*e*/o/*f*/)/*g*/{/*h*/log(p);/*i*/}/*j*/
