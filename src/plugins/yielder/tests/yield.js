@@ -6,7 +6,7 @@ function foo() {
     yield v;
 }
 function bar() {
-    var sum = function(a,b,c) { return a+b+c; }
+    function sum(a,b,c) { return a+b+c; }
     yield sum((yield 1), (yield 2), (yield 3));
 }
 

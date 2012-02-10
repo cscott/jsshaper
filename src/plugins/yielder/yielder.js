@@ -721,6 +721,37 @@ Shaper("yielder", function(root) {
           }
         }
     });
+    // rewrite 'function foo(...)' to 'var foo = function(...)'
+    // DO THIS GLOBALLY (not just inside generators).
+    // THIS ALTERS THE SEMANTICS OF THE LANGUAGE.
+    // See https://bugs.webkit.org/show_bug.cgi?id=65546 and
+    //     https://bugs.webkit.org/show_bug.cgi?id=27226
+    // We need to hoist the scope of the function declaration to make
+    // the generator work; the question is whether to attempt to
+    // move the entire function declaration (as webkit does) or just
+    // do the 'function foo' -> 'var foo = function' transformation
+    // (as mozilla does) which postpones the definition of foo until
+    // the assignment statement is executed.
+    // Since the rest of the yielder code is basically making webkit
+    // "more like JavaScript 1.7" (yield, generators, and iterators)
+    // it makes sense to just do the 'function foo' -> 'var foo = function'
+    // transformation to make this aspect of the semantics the same as
+    // JavaScript 1.7 as well, rather than to jump through hoops to try
+    // to preserve the arguably-broken-but-unfixable webkit semantics.
+    // If we're going to make this change, we're going to make it globally,
+    // so that we don't have one behavior inside generators and
+    // a different one outside.
+    root = Shaper.traverse(root, {
+        pre: function(node, ref) {
+            if (node.type === tkn.FUNCTION &&
+                (ref.base.type===tkn.SCRIPT ||
+                 ref.base.type===tkn.BLOCK)) {
+                var name = node.name || gensym('f');
+                var s = Shaper.replace(Shaper.parse('var '+name+' = $;'), node);
+                return ref.set(s);
+            }
+        }
+    });
     // rewrite catch variables and 'arguments'; assign temps to 'yield's
     root = Shaper.traverse(root, {
         func_stack: [{yield_info:{}}],
