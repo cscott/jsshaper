@@ -9,13 +9,25 @@ var log = (typeof console !== "undefined") && console.log || print;
 
 // converts functions containing yield/yield() to generators.
 Shaper("yielder", function(root) {
+    var allsyms = Object.create(null);
+    var registersym = function(sym) {
+        // add '$' to protect against built in object methods like
+        // hasOwnProperty, etc.
+        allsyms[sym+'$'] = true;
+    };
     var gensym = (function(){
         var i = 0;
         return function(base) {
+            var sym;
             base = base || 'tmp';
-            return '$'+base+'$'+(i++);
+            do {
+                // generate a new sym name, until it's actually unique...
+                sym = '$'+base+'$'+(i++);
+            } while ((sym+'$') in allsyms);
+            return sym;
         };
     })();
+    var $Generator, $stop, $arguments;
 
     function funcBodyStart(body, start_src) {
         start_src = start_src || '{';
@@ -113,7 +125,7 @@ Shaper("yielder", function(root) {
                 this.stack.pop();
             } else {
                 if (this.canFallThrough) {
-                    this.add(Shaper.parse('throw $stop;'), '');
+                    this.add(Shaper.parse('throw '+$stop+';'), '');
                 }
                 funcBodyFinish(top.body);
             }
@@ -216,7 +228,7 @@ Shaper("yielder", function(root) {
             }
             if (node.type === tkn.RETURN) {
                 this.canFallThrough = false;
-                return ref.set(Shaper.parse('throw $stop'));
+                return ref.set(Shaper.parse('throw '+$stop));
             }
             if (node.type === tkn.THROW) {
                 this.canFallThrough = false;
@@ -527,7 +539,7 @@ Shaper("yielder", function(root) {
             this.add(s, '');
 
             // bail if this is a stopiteration exception!
-            s = Shaper.parse('if ('+cc.yieldVarName+'===$stop) '+
+            s = Shaper.parse('if ('+cc.yieldVarName+'==='+$stop+') '+
                              '{ throw '+cc.yieldVarName+'; }');
             this.add(s, '');
 
@@ -570,13 +582,13 @@ Shaper("yielder", function(root) {
         var stmts = [];
         var i;
         // export the Generator and StopIteration
-        stmts.push(Shaper.parse('var $Generator = require("generator.js");'));
-        stmts.push(Shaper.parse('var $stop = {};'));
+        stmts.push(Shaper.parse('var '+$Generator+' = require("generator.js");'));
+        stmts.push(Shaper.parse('var '+$stop+' = {};'));
         if (props.vars.length > 0) {
             stmts.push(Shaper.parse("var "+props.vars.join(',')+";"));
         }
         if (props['arguments']) {
-            stmts.push(Shaper.parse('var $arguments = arguments;'));
+            stmts.push(Shaper.parse('var '+$arguments+' = arguments;'));
         }
         var yv = new YieldVisitor();
         console.assert(node.body.children.length > 0);
@@ -596,7 +608,7 @@ Shaper("yielder", function(root) {
         // Note that we need to make a bogus function wrapper here or else
         // parse() will complain about the 'return outside of a function'
         var newBody = Shaper.replace(
-            'function _(){return new $Generator(this, $stop, $);}',
+            'function _(){return new '+$Generator+'(this, '+$stop+', $);}',
             conts).body.children[0];
         stmts.push(newBody);
 
@@ -611,15 +623,20 @@ Shaper("yielder", function(root) {
     }
 
     // find functions containing 'yield' and take note of uses of
-    // 'arguments' and 'catch' as well.
+    // 'arguments' and 'catch' as well.  Register all symbols so that
+    // gensym is guaranteed to be safe.
     var yieldfns = [];
     root = Shaper.traverse(root, {
         fns: [{fake:true,vars:[],caught:[]}],
         pre: function(node, ref) {
+            var i;
             if (node.type === tkn.FUNCTION) {
                 this.fns.push({node: node, ref: ref, vars: [], caught: [],
                                'yield': false, 'arguments': false,
                                'catch': false, 'finally': false});
+                for (i=0; i<node.params.length; i++) {
+                    registersym(node.params[i]);
+                }
             }
             var fn = this.fns[this.fns.length-1];
             if (node.type === tkn.YIELD) {
@@ -630,18 +647,20 @@ Shaper("yielder", function(root) {
                 }
             }
             if (node.type === tkn.VAR) {
-                for (var i=0; i<node.children.length; i++) {
+                for (i=0; i<node.children.length; i++) {
                     var child = node.children[i];
                     if (child.type===tkn.ASSIGN) {
                         child = child.children[0];
                     }
                     console.assert(child.type===tkn.IDENTIFIER);
                     fn.vars.push(child.value);
+                    registersym(child.value);
                 }
             }
             if (node.type === tkn.CATCH) {
                 fn['catch'] = true;
                 fn.caught.push(node.varName);
+                registersym(node.varName);
             }
             if (node.type === tkn.TRY && node.finallyBlock) {
                 fn['finally'] = true;
@@ -651,7 +670,30 @@ Shaper("yielder", function(root) {
                 // variable named arguments, etc.  no worries.
                 fn['arguments'] = true;
             }
-          if (node.type === tkn.FOR_IN) {
+            if (node.type === tkn.IDENTIFIER) {
+                // again conservative: gets property names, too.
+                registersym(node.value);
+            }
+        },
+        post: function(node, ref) {
+            var fn;
+            if (node.type === tkn.FUNCTION) {
+                fn = this.fns.pop();
+                fn.node.yield_info = fn;
+                if (fn['yield']) {
+                    yieldfns.push(fn);
+                }
+            }
+        }
+    });
+    // gensym
+    $Generator = gensym('Generator');
+    $stop = gensym('stop');
+    $arguments = gensym('arguments');
+    // rewrite for-in loops
+    root = Shaper.traverse(root, {
+        pre: function(node, ref) {
+            if (node.type === tkn.FOR_IN) {
               // convert to use iterator
               var it = gensym('it'), e = gensym('e');
               var newFor = Shaper.replace('for(var '+it+'=Iterator($,true);;){'+
@@ -680,16 +722,6 @@ Shaper("yielder", function(root) {
                   (newFor.body.trailingComment || '');
               return ref.set(newFor);
           }
-        },
-        post: function(node, ref) {
-            var fn;
-            if (node.type === tkn.FUNCTION) {
-                fn = this.fns.pop();
-                fn.node.yield_info = fn;
-                if (fn['yield']) {
-                    yieldfns.push(fn);
-                }
-            }
         }
     });
     // rewrite catch variables and 'arguments'
@@ -724,7 +756,7 @@ Shaper("yielder", function(root) {
                 }
                 // if this is a generator, add new name for 'arguments'
                 if (node.yield_info['yield']) {
-                    this.varenv.put('arguments', '$arguments');
+                    this.varenv.put('arguments', $arguments);
                 } else {
                     this.varenv.remove('arguments');
                 }
