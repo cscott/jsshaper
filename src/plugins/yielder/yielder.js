@@ -742,13 +742,52 @@ Shaper("yielder", function(root) {
     // so that we don't have one behavior inside generators and
     // a different one outside.
     root = Shaper.traverse(root, {
+        func_stack: [{func:root, hoist:[]}],
         pre: function(node, ref) {
-            if (node.type === tkn.FUNCTION &&
-                (ref.base.type===tkn.SCRIPT ||
-                 ref.base.type===tkn.BLOCK)) {
-                var name = node.name || gensym('f');
-                var s = Shaper.replace(Shaper.parse('var '+name+' = $;'), node);
-                return ref.set(s);
+            if (node.type === tkn.FUNCTION) {
+                this.func_stack.push({func: node, hoist:[]});
+            }
+        },
+        post: function(node, ref) {
+            var f,i,s;
+            if (node.type === tkn.FUNCTION) {
+                f = this.func_stack.pop();
+                // hoist any of this function's children who need it.
+                for (i=f.hoist.length-1; i>=0; i--) {
+                    var sref = f.hoist[i];
+                    s = sref.get();
+                    // grab the 'src' which is about to be deleted by .remove()
+                    // (this logic is copied from the Shaper.remove())
+                    var index = Number(sref.properties[1]);
+                    if (index !== sref.base[sref.properties[0]].length) {
+                        index++;
+                    }
+                    var src = sref.base.srcs[index];
+                    // remove the statement from its old location
+                    Shaper.remove(sref);
+                    // add it to the top of the function.
+                    Shaper.insertBefore(new Ref(node.body, 'children', 0),
+                                        s, src);
+                }
+                var parent = this.func_stack[this.func_stack.length-1];
+                if (ref.base === root) {
+                    /* leave top level decls alone */
+                    return;
+                }
+                if (ref.base.type===tkn.SCRIPT ||
+                    ref.base.type===tkn.BLOCK) {
+                    // function statement (not a function expression)
+                    // rewrite as 'var ... = function ...'
+                    var name = node.name || gensym('f');
+                    s = Shaper.replace(Shaper.parse('var '+name+' = $;'),
+                                       node);
+                    if (ref.base === parent.func.body) {
+                        // for top-level function statements, mark them
+                        // for hoisting to the top of the function.
+                        parent.hoist.push(ref);
+                    }
+                    return ref.set(s);
+                }
             }
         }
     });

@@ -5,7 +5,7 @@ function foo() {
     log(!!sum);
     function sum(x, y) { return x + y; }
     log(!!sum);
-}
+};/* deliberate trailing semicolon */
 function foo2(b) {
     log(!!sum);
     if (b) {
