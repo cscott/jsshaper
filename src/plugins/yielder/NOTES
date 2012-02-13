@@ -50,118 +50,121 @@ function bat(arr) {
 // This gets converted to:
 
 function bat(arr) {
-  var $stop = {};
   var $arguments = arguments; // necessary because original uses 'arguments'
   var $catch$e;               // necessary because original has catch
-  var $finally$ex;            // necessary because original has finally
-  var $finally$fall;          // necessary because original has finally
+  var $finally;            // necessary because original has finally
+  var $pc = 0;
   var i, j;
-  return new Generator(this, $stop, [
-    function() { // [0] (external, but first: don't need to check arguments[0])
-       i = 0;
-       return 1; // looping continuation
-    },
-    function() { // [1] (internal)
-       // internal looping continuation, don't need to check arguments[0] for ex
-       // "if (!(i < arr.length)) break;"
-       if (i >= arr.length) { return 11; /* looping continuation, after loop */ }
-       if (test.apply(arr[i], $arguments)) {
-           return 2;
+  return new Generator(function($stop, $ex, $val) {
+    while(true) {
+    switch ($pc) {
+    case 0: // internal, FIRST
+       if ($ex || ($val!===void(0))) { // check first send.
+         throw new TypeError();
        }
-       return 10;
-    },
-    function() { // [2] (internal)
-       return 3; // top of try
-    },
-    function() { // [3] (internal)
+       i = 0;
+       $pc = 1; continue; // looping continuation [OPTIMIZE: FALL THROUGH]
+    case 1: // internal
+       // internal looping continuation, don't need to check $ex for ex
+       // "if (!(i < arr.length)) break;"
+       if (i >= arr.length) {
+         $pc = 11;
+         continue; /* looping continuation, after loop */
+       }
+       if (test.apply(arr[i], $arguments)) {
+           $pc = 2; continue; // [OPTIMIZE: FALL THROUGH]
+       } else {
+           $pc = 10; continue;
+       }
+    case 2: // internal
+       $pc = 3; continue; // [OPTIMIZE: FALL THROUGH]
+    case 3: // internal
        try {
          something();
-         return { cont: 4, ret: arr[i] }; // yield
+         $pc = 4; return arr[i]; // yield
        } catch (e) {
          if (e===$stop) {
            // (would rethrow e if there wasn't a finally block)
-           return { cont:8, ex:e, again:true; }; // branch to finally
+           $pc = 8; $ex = {ex:e}; continue; // branch to finally
+         } else {
+           $pc = 7; $ex = {ex:e}; continue; // branch to catch
          }
-         return { cont:7, ex:e, again:true; }; // branch to catch
        }
-    },
-    function() { // [4] (external)
+    case 4: // external
       try {
-        // external continuation, need to check arguments[0]
-        if (arguments[0]) { throw arguments[0].ex; }
-        j = arguments[1];
-        if (j) return 5;
-        return 6;
+        // external continuation, need to check $ex
+        if ($ex) { throw $ex.ex; }
+        j = $val;
+        if (j) {
+            $pc = 5; continue; // OPTIMIZE: FALL THROUGH
+        } else {
+            $pc = 6; continue;
+        }
       } catch (e) {
-         if (e===$stop) {
-           return { cont:8, ex:e, again:true; }; // branch to finally
-         }
-         return { cont:7, ex:e, again:true; }; // branch to catch
+        if (e===$stop) {
+          $pc=8; $ex={ex:e}; continue; // branch to finally
+        } else {
+          $pc=7; $ex={ex:e}; continue; // branch to catch
+        }
       }
-    },
-    function() { // [5] (internal)
+    case 5: // internal
       try {
         something(j);
         throw $stop; // return
       } catch (e) {
-         if (e===$stop) {
-           return { cont:8, ex:e, again:true; }; // branch to finally
-         }
-         return { cont:7, ex:e, again:true; }; // branch to catch
+        if (e===$stop) {
+          $pc=8; $ex={ex:e}; continue; // branch to finally
+        } else {
+          $pc=7; $ex={ex:e}; continue; // branch to catch
+        }
       }
-    },
-    function() { // [6] (internal)
+    case 6: // internal
       try {
-        return { cont:8, fall:true, again:true};// this falls through to finally
+        $pc=8; $ex={fall:true}; continue; // this falls through to finally
       } catch (e) {
-         if (e===$stop) {
-           return { cont:8, ex:e, again:true; }; // branch to finally
-         }
-         return { cont:7, ex:e, again:true; }; // branch to catch
+        if (e===$stop) {
+          $pc=8; $ex={ex:e}; continue; // branch to finally
+        } else{
+          $pc=7; $ex={ex:e}; continue; // branch to catch [FALL THROUGH]
+        }
       }
-    },
-    function() { // [7] (internal, catch(e))
+    case 7: // internal, catch(e)
       // note that e has block-level scope; this is desugared out.
-      $catch$e = arguments[0];
+      $catch$e = $ex.ex;
       try {
         log($catch$e);
         delete arr[i];
         $catch$e = null; // free!
-        return { cont:8, fall:true, again:true}; // fall through to finally
+        $pc=8; $ex={fall:true}; continue; // fall through to finally [FALL THRU]
       } catch (e) {
-        return { cont:8, ex:e, again:true; }; // branch to finally
+        $pc=8; $ex={ex:e}; continue; // branch to finally [FALL THROUGH]
       }
-    },
-    function() { // [8] (internal, finally)
-      $finally$ex = arguments[0];
-      $finally$fall = arguments[1];
+    case 8: // internal, finally
+      $finally = $ex;
       baz(i);
-      if ($finally$fall) return 9; // after try
-      throw $finally$ex;
-    },
-    function() { // [9] (internal)
-      return 10; // after if
-    },
-    function() { // [10] (internal)
+      if ($finally.fall) {
+        $pc=9; continue; // after try [OPTIMIZE: FALL THROUGH]
+      } else {
+        throw $finally.ex;
+      }
+    case 9: // internal
+      $pc = 10; continue; // after if [OPTIMIZE: FALL THROUGH]
+    case 10: // internal
       // implicit increment, belonging to for loop
       i++;
-      return 1; // loop!
-    },
-    function() { // [11] (internal)
+      $pc = 1; continue; // loop!
+    case 11: // internal
       throw $stop;
     }
-  ]);
+    }
+  }.bind(this));
 }
 
 // Using this helper to construct the generator object:
 
-function Generator(cont_this, cont_stop, cont_array) {
-  this._cont_this = cont_this;
-  this._cont_array = cont_array;
-  this._cont_next = cont_array[0];
-  this._first = true;
-  this._closed = false;
-  this._cont_stop = cont_stop; // our stand-in for StopIteration
+function Generator(cont_func) {
+  this._cont_func = cont_func;
+  this._cont_stop = {}; // our stand-in for StopIteration
 }
 Generator.prototype = {
   next: function() {
@@ -169,60 +172,39 @@ Generator.prototype = {
     return this.send(undef);
   },
   send: function(val) {
-    var undef;
-    if (this._first) {
-      this._first = false;
-      if (val !== undef) { throw new TypeError(); }
-    }
     return this._send(null, val);
   },
   'throw': function(ex) {
+    // wrap ex, because we're allowed to throw falsy values (null,undef)
     return this._send({ex:ex},null);
   },
   close: function() {
-    if (this._closed) { return; }
     try {
       // note that catch clauses have to be modified to ignore StopIteration
       this['throw'].call(this, this._cont_stop);
     } catch (e) {
-      if (e!==this._cont_stop) { throw e; }
-    } finally {
-      // should be impossible to catch this._cont_stop, so this._send should
-      // have already closed the generator.
-      console.assert(this._closed);
+      if (e!==StopIteration) { throw e; }
     }
   },
-  _close: function() {
-    console.assert(!this._closed);
-    this._closed = true;
-    // free memory
-    this._cont_this = null;
-    this._cont_array = null;
-    this._cont_next = null;
-  },
   _send: function(exception, value) {
-    if (this._closed) { throw StopIteration; }
     try {
-      var r;
-      while (true) { // this lets us do a simpler CPS conversion of loops
-        r = this._cont_next.call(this._cont_this, exception, value);
-        exception = value = null;
-        if (typeof(r)==='number') {
-          this._cont_next = this._cont_array[r];
-        } else {
-          this._cont_next = this._cont_array[r.cont];
-          if (r.again) {
-            value = r.fall; // fallthrough, for finally blocks
-            exception = r;  // r.ex contains exception; r is wrapper
-          } else {
-            return r.ret;
-          }
-        }
-      }
+      return this._cont_func(this._cont_stop, exception, value);
     } catch (e) {
-      this._close();
+      // close iterator and free memory held by _cont_func
+      this._cont_func = function($stop) { throw $stop; };
       if (e===this._cont_stop) { throw StopIteration; }
       throw e;
+    }
+  },
+  toArray: function(arr) {
+    arr = arr || [];
+    while(true) {
+      try {
+        arr.push(this.next());
+      } catch (e) {
+        if (e===StopIteration) { return arr; }
+        throw e;
+      }
     }
   }
 };
