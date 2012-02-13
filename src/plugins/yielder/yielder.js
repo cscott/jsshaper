@@ -478,6 +478,77 @@ Shaper("yielder", function(root) {
         }
         this.newInternalCont();
     };
+    YieldVisitor.prototype[tkn.SWITCH] = function(node, src) {
+        var i, r;
+        var s = Shaper.parse(node.switchVarName+' = $;');
+        s = Shaper.replace(s, node.discriminant);
+        if (node.leadingComment) { this.addComment(node.leadingComment); }
+        this.addComment(removeTokens(node.srcs[0],
+                                     tkn.SWITCH, tkn.LEFT_PAREN, tkn.END));
+        this.add(s);
+        r = this.addReturn(-1);
+        this.addComment(removeTokens(node.srcs[1],
+                                     tkn.RIGHT_PAREN, tkn.LEFT_CURLY, tkn.END));
+        this.newInternalCont();
+
+        var defaultLabel=null;
+        var nextTest = [{ref:new Ref(r.expression, 'value')}], nextBody = [];
+
+        for (i=0; i<node.cases.length; i++) {
+            var c = node.cases[i];
+            var csrc = node.srcs[i+2];
+            if (i===node.cases.length-1) {
+                csrc = removeTokens(csrc, tkn.RIGHT_CURLY, tkn.END) + src;
+            }
+            if (c.leadingComment) { this.addComment(c.leadingComment); }
+            if (c.type===tkn.DEFAULT) {
+                defaultLabel = this.stack.length-1;
+                this.addComment(removeTokens(c.srcs[0],
+                                             tkn.DEFAULT, tkn.COLON, tkn.END));
+            } else {
+                // new case test
+                this.fixupJumps(nextTest, this.stack.length-1);
+                r = this.returnStmt(-1);
+                nextBody.push({ref:new Ref(r.expression, 'value')});
+                s = Shaper.parse('if ('+node.switchVarName+'===($)) $');
+                s = Shaper.replace(s, c.caseLabel, r);
+                this.addComment(removeTokens(c.srcs[0], tkn.CASE, tkn.END));
+                this.add(s, removeTokens(c.srcs[1], tkn.COLON, tkn.END));
+
+                // branch to next case test
+                r = this.addReturn(-1);
+                nextTest.push({ref:new Ref(r.expression, 'value')});
+
+                this.newInternalCont();
+            }
+            this.fixupJumps(nextBody, this.stack.length-1);
+            this.addComment(c.srcs[c.srcs.length-1]);
+            // c.statements is a block w/o braces.  fixup before visiting.
+            console.assert(c.statements.type===tkn.BLOCK);
+            console.assert(c.statements.srcs.join('').indexOf('{')===-1);
+            c.statements.srcs[0] = '{' + c.statements.srcs[0];
+            c.statements.srcs[c.statements.srcs.length-1] += '}';
+            this.visit(c.statements, csrc);
+
+            if (this.canFallThrough) {
+                // branch to next case body
+                r = this.addReturn(-1);
+                nextBody.push({ref:new Ref(r.expression, 'value')});
+            }
+            if (c.trailingComment) { this.addComment(c.trailingComment); }
+            this.newInternalCont();
+        }
+        // default case.
+        if (defaultLabel!==null) {
+            this.fixupJumps(nextTest, defaultLabel);
+        } else {
+            this.fixupJumps(nextTest, this.stack.length-1);
+        }
+        // fall through; break
+        this.fixupJumps(this.breakFixup, this.stack.length-1, node);
+        this.fixupJumps(nextBody, this.stack.length-1);
+        if (node.trailingComment) { this.addComment(node.trailingComment); }
+    };
     YieldVisitor.prototype[tkn.TRY] = function(node, src) {
         var c,i,j,s;
         var r = this.addReturn(this.stack.length);
@@ -828,6 +899,7 @@ Shaper("yielder", function(root) {
                     this.varenv.remove('arguments');
                 }
             }
+            var yi = this.current_func().yield_info;
             if (node.type===tkn.DOT) {
                 // only traverse 1st child; second is not an expression
                 Shaper.traverse(node.children[0], this,
@@ -847,12 +919,12 @@ Shaper("yielder", function(root) {
             }
             if (node.type===tkn.CATCH) {
                 this.varenv.push();
-                if (this.current_func().yield_info['yield']) {
+                if (yi['yield']) {
                     // catch inside a generator!
                     // add this to the environment
                     node.yieldVarName = gensym(node.varName);
                     this.varenv.put(node.varName, node.yieldVarName);
-                    this.current_func().yield_info.vars.push(node.yieldVarName);
+                    yi.vars.push(node.yieldVarName);
                 } else if (this.varenv.has(node.varName)) {
                     // this catch shadows a previously-caught variable;
                     // remove it from the environment.
@@ -860,15 +932,20 @@ Shaper("yielder", function(root) {
                 }
             }
             if (node.type===tkn.TRY && node.finallyBlock) {
-                if (this.current_func().yield_info['yield']) {
+                if (yi['yield']) {
                     node.finallyVarName = gensym('finally');
-                    this.current_func().yield_info.vars.push(
-                        node.finallyVarName);
+                    yi.vars.push(node.finallyVarName);
                 }
             }
             if (node.type===tkn.YIELD) {
-                node.yieldVarName = gensym('y');
-                this.current_func().yield_info.vars.push(node.yieldVarName);
+                node.yieldVarName = gensym('yield');
+                yi.vars.push(node.yieldVarName);
+            }
+            if (node.type===tkn.SWITCH) {
+                if (yi['yield']) {
+                    node.switchVarName = gensym('switch');
+                    yi.vars.push(node.switchVarName);
+                }
             }
         },
         post: function(node, ref) {

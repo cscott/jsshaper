@@ -131,3 +131,17 @@ Number.prototype.__iterator__ = function() {
           i++ )
         yield i;/*b*/
 };
+
+function sw(v) { /*a*/
+/*b*/ switch /*c*/ (/*d*/l(v)/*e*/)/*f*/ {/*g*/
+/*h*/ case /*i*/ l(1)/*j*/:/*k*/ yield -1; /*l*/
+/*m*/ case /*n*/l(2)/*o*/: /*p*/yield -2; /*q*/
+/*r*/             break /*s*/; /*t*/
+/*u*/ case /*v*/ l(3)/*w*/:/*x*/ {/*y*/ yield -3;/*z*/ }/*0*/
+/*1*/ default/*2*/:/*3*/   yield /*4*/ -4 /*5*/; /*6*/
+/*7*/    if (l(v)==4) break; /*8*/
+/*9*/    yield -5; /*10*/
+/*11*/  } /*12*/
+/*13*/  log('bottom'); /*14*/
+/*15*/
+}
