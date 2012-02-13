@@ -303,3 +303,51 @@ function props(obj) {
         }
     ]);
 }
+-------------------
+Generator.toArray() {
+  var a = [];
+  for (e in this) { a.push(e); }
+  return a;
+}
+
+function() {
+  var a = [];
+  for (var i=0; i<10; i++) {
+    try {
+      throw i;
+    } catch (j) {
+      a[i] = function() { return j++; };
+    }
+  }
+  log(a[0]);
+  log(a[0]);
+  log(a[1]);
+  log(a[1]);
+}
+
+{ let x=..; .. } -> try { throw void(0); } catch(x) { x=...; ... }
+
+for (let i=...;;i=i+1) { } ->
+{let $t; for ($t=...; ;) { let i=$t; ...; i=i+1; $t=i; } }
+
+{
+let t;
+
+t = ... t ....;
+.. = function() { ... t ... };
+}
+
+{$scope = Object.create($scope);
+ $scope.t=undefined;
+
+ $scope.t = .... $scope.t ....;
+
+ ... = (function($scope) { return function() { ... $scope.t ... }; })($scope);
+
+ $scope = Object.getPrototypeOf($scope);
+}
+
+Only create new $scope objects if the variable escapes; otherwise we can
+just gensym the symbol and use var-binding.
+
+---
