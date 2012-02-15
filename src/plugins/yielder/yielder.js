@@ -773,6 +773,18 @@ Shaper("yielder", function(root) {
         return node;
     }
 
+    // rewrite "short function literal" syntax
+    root = Shaper.traverse(root, {
+        post: function(node, ref) {
+            if (node.type === tkn.FUNCTION &&
+                node.body.type !== tkn.SCRIPT) {
+                var s = Shaper.parse("_=function(){return $;}")
+                    .children[1].body;
+                s = Shaper.replace(s, node.body);
+                node.body = s;
+            }
+        }
+    });
     // rewrite generator expressions and array comprehensions
     root = Shaper.traverse(root, {
         generator: function(node) {
