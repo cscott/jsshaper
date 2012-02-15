@@ -109,6 +109,7 @@ Shaper("yielder", function(root) {
         this.breakFixup = [];
         this.continueFixup = [];
         this.newInternalCont();
+        this.opt = [];
     }
     YieldVisitor.prototype = {
         top: function() { return this.stack[this.stack.length-1]; },
@@ -136,6 +137,11 @@ Shaper("yielder", function(root) {
                      ref: new Ref(branchStmt.children[0].expression,
                                   'children', 1) };
         },
+        optBranch: function(from, branchStmt) {
+            this.opt.push({from: from,
+                           to_ref:  branchStmt.ref,
+                           cont:  branchStmt.stmt.children[1]});
+        },
         addBranch: function(where) {
             if (!this.canFallThrough) {
                 log("// Adding unreachable return");
@@ -143,6 +149,7 @@ Shaper("yielder", function(root) {
             var branchStmt = this.branchStmt(where);
             this.add(branchStmt.stmt.children, '');
             this.canFallThrough = false;
+            this.optBranch(this.stack.length-1, branchStmt);
             return branchStmt;
         },
         close: function() {
@@ -155,6 +162,18 @@ Shaper("yielder", function(root) {
                 }
                 funcBodyFinish(top.body);
             }
+        },
+        optimizeBranches: function() {
+            this.opt.forEach(function(o) {
+                var from = o.from;
+                var to = o.to_ref.get();
+                if (to.type!==tkn.NUMBER) { return; }
+                to = to.value;
+                if ((from+1) !== to) { return; }
+                // remove the continue statement!
+                o.cont.expression = null;
+                o.cont.srcs = ['/*fall through*/'];
+            });
         },
 
         newInternalCont: function() {
@@ -191,6 +210,7 @@ Shaper("yielder", function(root) {
                 funcBodyAdd(c, s, '');
                 s = this.branchStmt(-1);
                 funcBodyAdd(c, s.stmt.children, '');
+                this.optBranch(this.stack.length, s);
                 // record fixup needed for catch block.
                 tb.catchFixups.push(s);
                 funcBodyFinish(c);
@@ -488,6 +508,7 @@ Shaper("yielder", function(root) {
     YieldVisitor.prototype[tkn.IF] = function(child, src) {
         child.condition = Shaper.traverse(child.condition, this,
                                           new Ref(child, 'condition'));
+        var ifLoc = this.stack.length - 1, b;
         this.add(child, '');
         this.canFallThrough = false; // both sides of IF will get returns
 
@@ -497,7 +518,9 @@ Shaper("yielder", function(root) {
         var thenPlace = this.canFallThrough ?
             this.addBranch(this.stack.length) : null /*optimization*/;
         // replace original thenPart with branch to continuation
-        child.thenPart = this.branchStmt(thenPart).stmt;
+        b = this.branchStmt(thenPart);
+        child.thenPart = b.stmt;
+        this.optBranch(ifLoc, b);
 
         if (child.elsePart) {
             var elsePart = this.stack.length;
@@ -507,10 +530,12 @@ Shaper("yielder", function(root) {
                 this.addBranch(this.stack.length);
             }
             // replace original elsePart with branch to continuation
-            child.elsePart = this.branchStmt(elsePart).stmt;
+            b = this.branchStmt(elsePart);
+            child.elsePart = b.stmt;
             if (child.srcs[2].length===4) {
                 child.srcs[2] += ' '; // ensure token separation
             }
+            this.optBranch(ifLoc, b);
             // fixup then part
             if (thenPlace) {
                 fixupJumps([thenPlace], this.stack.length);
@@ -713,6 +738,7 @@ Shaper("yielder", function(root) {
         // translate function
         yv.visitBlock(node.body.children, inner_srcs);
         yv.close();
+        yv.optimizeBranches();
 
         var s = Shaper.parse('_=function('+$stop+','+$ex+','+$val+'){'+
                              'while(true){'+
