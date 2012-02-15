@@ -59,7 +59,7 @@ function bat(arr) {
     while(true) {
     switch ($pc) {
     case 0: // internal, FIRST
-       if ($ex || ($val!===void(0))) { // check first send.
+       if ($ex || ($val!==void(0))) { // check first send.
          throw new TypeError();
        }
        i = 0;
@@ -83,12 +83,7 @@ function bat(arr) {
          something();
          $pc = 4; return arr[i]; // yield
        } catch (e) {
-         if (e===$stop) {
-           // (would rethrow e if there wasn't a finally block)
-           $pc = 8; $ex = {ex:e}; continue; // branch to finally
-         } else {
-           $pc = 7; $ex = {ex:e}; continue; // branch to catch
-         }
+         $pc = 7; $ex = {ex:e}; continue; // branch to catch (or finally)
        }
     case 4: // external
       try {
@@ -101,37 +96,28 @@ function bat(arr) {
             $pc = 6; continue;
         }
       } catch (e) {
-        if (e===$stop) {
-          $pc=8; $ex={ex:e}; continue; // branch to finally
-        } else {
-          $pc=7; $ex={ex:e}; continue; // branch to catch
-        }
+        $pc=7; $ex={ex:e}; continue; // branch to catch (or finally)
       }
     case 5: // internal
       try {
         something(j);
         throw $stop; // return
       } catch (e) {
-        if (e===$stop) {
-          $pc=8; $ex={ex:e}; continue; // branch to finally
-        } else {
-          $pc=7; $ex={ex:e}; continue; // branch to catch
-        }
+        $pc=7; $ex={ex:e}; continue; // branch to catch (or finally)
       }
     case 6: // internal
       try {
         $pc=8; $ex={fall:true}; continue; // this falls through to finally
       } catch (e) {
-        if (e===$stop) {
-          $pc=8; $ex={ex:e}; continue; // branch to finally
-        } else{
-          $pc=7; $ex={ex:e}; continue; // branch to catch [FALL THROUGH]
-        }
+        $pc=7; $ex={ex:e}; continue; // branch to catch [FALL THROUGH]
       }
     case 7: // internal, catch(e)
+      // branch to finally block if this shouldn't have been caught.
+
       // note that e has block-level scope; this is desugared out.
-      $catch$e = $ex.ex;
       try {
+        $catch$e = $ex.ex;
+        if ($catch$e===$stop) { throw $catch$e; }
         log($catch$e);
         delete arr[i];
         $catch$e = null; // free!
