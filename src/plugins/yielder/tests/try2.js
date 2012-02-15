@@ -52,11 +52,11 @@ function foo(f) {
         yield 2;
         yield 3; // should not reach here
     } finally {
-        function f() {
+        function fff() {
             var e = "finally"; // this is *not* foo's e.
             return e;
         }
-        log(f());
+        log(fff());
     }
 }
 

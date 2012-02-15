@@ -1,6 +1,7 @@
 var log = (typeof console !== "undefined") && console.log || print;
 (typeof require !== 'undefined') && require('setup.js');
 
+var sum;
 function foo() {
     log(!!sum);
     function sum(x, y) { return x + y; }

@@ -1,3 +1,4 @@
 *.yielder.js
 *.actual
 *.rhino
+*.gjs

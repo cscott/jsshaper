@@ -20,6 +20,13 @@ checkrhino-%: tests/%.js
 	@-rhino -version 180 $< 2>&1 > tests/$*.rhino
 	@-diff -u tests/$*.expected tests/$*.rhino
 
+rungjs-%: tests/%.js
+	@gjs $<
+
+checkgjs-%: tests/%.js
+	@-gjs $< 2>&1 > tests/$*.gjs
+	@-diff -u tests/$*.expected tests/$*.gjs
+
 checklines-%: tests/%.yielder.js
 	@wc -l tests/$*.js | cut -f 1 -d ' ' > tmp1
 	@wc -l tests/$*.yielder.js | cut -f 1 -d ' ' > tmp2
@@ -28,11 +35,20 @@ checklines-%: tests/%.yielder.js
         fi
 	@$(RM) tmp1 tmp2
 
-test: $(patsubst tests/%.expected,check-%,$(wildcard tests/*.expected)) \
-      $(patsubst tests/%.expected,checklines-%,$(wildcard tests/*.expected)) \
-      $(filter-out checkrhino-try3 checkrhino-array,\
-      $(patsubst tests/%.expected,checkrhino-%,$(wildcard tests/*.expected))) \
+check-all:\
+	$(patsubst tests/%.expected,check-%,$(wildcard tests/*.expected))
+checklines-all:\
+	$(patsubst tests/%.expected,checklines-%,$(wildcard tests/*.expected))\
 	checklines-comments checklines-simple
+# rhino's JS implementation is a little buggy; ignore some tests.
+checkrhino-all:\
+      $(filter-out checkrhino-try3 checkrhino-array checkrhino-forin \
+                   checkrhino-break checkrhino-break2,\
+      $(patsubst tests/%.expected,checkrhino-%,$(wildcard tests/*.expected)))
+checkgjs-all:\
+      $(patsubst tests/%.expected,checkgjs-%,$(wildcard tests/*.expected)) \
+
+test: check-all checklines-all checkgjs-all checkrhino-all
 
 .SECONDARY: # preserve generated *.yielder.js files
 
