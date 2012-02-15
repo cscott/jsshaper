@@ -479,7 +479,7 @@ Shaper("yielder", function(root) {
         }
 
         // loop body
-        this.visit(child.body, src);
+        this.visit(child.body, '');
 
         // loop update
         if (this.canFallThrough) {
@@ -494,6 +494,10 @@ Shaper("yielder", function(root) {
             // transfer comments from child.update
             this.addComment(removeAllTokens(child.update));
         }
+        if (child.trailingComment) {
+            this.addComment(child.trailingComment);
+        }
+        this.addComment(src);
 
         // fixup loop check
         fixupJumps([branchFixup],this.stack.length);
@@ -794,15 +798,19 @@ Shaper("yielder", function(root) {
                                  'var '+forLoop.iterator.name+';'+
                                  '$})()');
             s = Shaper.replace(s, forLoop);
+            Shaper.cloneComments(s, node);
+
             var y = Shaper.parse('function _(){if ($) yield ($);}').
                 body.children[0];
             forLoop.body = Shaper.replace(y, guard, node.expression);
-            // _iterator is not a varDecl.
+
+            // _iterator is not/no longer a varDecl.
             forLoop._iterator = Shaper.parse(forLoop.iterator.name);
             delete forLoop.varDecl;
+
             // have to fix up forLoop's srcs array, weird
             var src = splitTokens(forLoop.srcs[0], tkn.FOR);
-            var src0 = src[0]+'for ';
+            var src0 = (node.tail.leadingComment||'')+src[0]+'for ';
             if (forLoop.isEach) {
                 src = splitTokens(src[1], tkn.IDENTIFIER/*each*/);
                 src0 += src[0]+'each ';
@@ -819,9 +827,17 @@ Shaper("yielder", function(root) {
                 s = Shaper.parse('(($).toArray())');
                 s = Shaper.replace(s, this.generator(node));
                 // have to remove trailing '[' from parent's src
-                console.assert(ref.properties.length===2 &&
-                               ref.properties[0]==='children');
-                var n = +ref.properties[1];
+                var n;
+                if (ref.properties.length===2 &&
+                    ref.properties[0]==='children') {
+                    n = +ref.properties[1];
+                } else if (ref.base.srcs.length===2) {
+                    n = 0;
+                } else {
+                    // can't find the right srcs element =(
+                    console.assert(false, ref);
+                }
+                console.assert(ref.base.srcs[n].indexOf('[')>=0);
                 ref.base.srcs[n] = ref.base.srcs[n].replace(/\[(\s*)$/, '$1');
                 return ref.set(s);
             }

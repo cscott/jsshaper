@@ -145,3 +145,11 @@ function sw(v) { /*a*/
 /*13*/  log('bottom'); /*14*/
 /*15*/
 }
+
+function arrayc(range) { /*a*/
+/*b*/ return /*c*/ [ /*d*/ i /*e*/ * /*f*/ i /*g*/ for /*h*/ each /*i*/
+    ( /*j*/ i /*k*/ in /*l*/
+        /*l2*/range /*m*/ ( /*n*/0 /*o*/,/*p*/ 10/*q*/)/*r*/)/*s*/
+                   /*s2*/]/*t*/;/*u*/
+/*v*/
+}
