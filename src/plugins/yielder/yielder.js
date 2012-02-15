@@ -18,12 +18,18 @@ Shaper("yielder", function(root) {
     var gensym = (function(){
         var i = 0;
         return function(base) {
-            var sym;
+            var sym, first=true;
             base = base || 'tmp';
             do {
                 // generate a new sym name, until it's actually unique...
-                sym = '$'+base+'$'+(i++);
+                sym = '$'+base;
+                if (first) {
+                    first = false;
+                } else {
+                    sym += '$'+(i++);
+                }
             } while ((sym+'$') in allsyms);
+            registersym(sym);
             return sym;
         };
     })();
