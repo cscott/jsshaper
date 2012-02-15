@@ -929,16 +929,20 @@ Shaper("yielder", function(root) {
               // convert to use iterator
               var it = gensym('it'), e = gensym('e');
               var param=(node.isEach ? "false,true" : "true");
-              var newFor = Shaper.replace('for(var '+it+'=Iterator($,'+param+');;){'+
+              var newBlock=Shaper.replace('try{'+
+                                          'var '+it+'=Iterator($,'+param+');'+
+                                          'for(;;){'+
                                           'try { $='+it+'.next(); } '+
                                           'catch ('+e+') { '+
                                           'if ('+e+'===StopIteration) break; '+
                                           'throw '+e+'; }'+
-                                          '$}',
+                                          '$}'+
+                                          '}finally{'+it+'.close();}',
                                           node.object,
                                           node.varDecl || node._iterator,
                                           node.body);
-              newFor.labels = node.labels;
+              var newFor = newBlock.tryBlock.children[1];
+              newFor.labels = node.labels;//XXX
               Shaper.cloneComments(newFor, node);
               newFor.srcs[0] = node.srcs[0];
               if (node.isEach) {
@@ -946,19 +950,19 @@ Shaper("yielder", function(root) {
                       removeTokens(node.srcs[0], tkn.FOR,
                                    tkn.IDENTIFIER/*each*/);
               }
-              newFor.srcs[1] =
+              newFor.srcs[0] +=
                   removeTokens(node.srcs[1], tkn.IN, tkn.END) +
-                  newFor.srcs[1] +
-                  removeTokens(node.srcs[2], tkn.RIGHT_PAREN, tkn.END);
-              newFor.srcs[2] = node.srcs[3];
+                  ';;'+
+                  node.srcs[2];
+              newFor.srcs[1] = node.srcs[3];
               newFor.formerly = node; // for matching up break/continue
               // looks better if we move the trailing comment from the old body
               // to the new body
               var trailing = node.body.trailingComment || '';
               delete node.body.trailingComment;
-              newFor.body.trailingComment = trailing +
+              newBlock.trailingComment = trailing +
                   (newFor.body.trailingComment || '');
-              return ref.set(newFor);
+              return ref.set(newBlock);
           }
         }
     });
