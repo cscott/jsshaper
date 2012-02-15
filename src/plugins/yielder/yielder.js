@@ -227,15 +227,15 @@ Shaper("yielder", function(root) {
             this.add(Shaper.parse(yieldVarName+'='+$val+';'), '');
         },
 
-        visit: function(child, src) {
+        visit: function(node, src) {
             this.canFallThrough = true;
-            if (child.type in this) {
-                return this[child.type].call(this, child, src);
+            if (node.type in this) {
+                return this[node.type].call(this, node, src);
             }
-            console.assert(!child.isLoop);
-            var wrapper = { node: child };
+            console.assert(!node.isLoop);
+            var wrapper = { node: node };
             var ref = new Ref(wrapper, 'node');
-            ref.set(Shaper.traverse(child, this, ref));
+            ref.set(Shaper.traverse(node, this, ref));
             this.add(wrapper.node, src);
         },
 
@@ -369,17 +369,17 @@ Shaper("yielder", function(root) {
         this.newInternalCont();
         fixupJumps(this.breakFixup, labelEnd, this_target);
     };
-    YieldVisitor.prototype[tkn.DO] = function(child, src) {
-        child.condition = Shaper.traverse(child.condition, this,
-                                          new Ref(child, 'condition'));
+    YieldVisitor.prototype[tkn.DO] = function(node, src) {
+        node.condition = Shaper.traverse(node.condition, this,
+                                          new Ref(node, 'condition'));
         var loopStart = this.stack.length;
-        if (child.leadingComment) {
-            this.addComment(child.leadingComment);
+        if (node.leadingComment) {
+            this.addComment(node.leadingComment);
         }
         this.addBranch(loopStart);
 
         this.newInternalCont();
-        this.visit(child.body, '');
+        this.visit(node.body, '');
         var loopContinue = this.stack.length;
         if (this.canFallThrough) {
             this.addBranch(loopContinue);
@@ -388,61 +388,61 @@ Shaper("yielder", function(root) {
 
         // bottom of loop: check the condition.
         var loopCheck = Shaper.parse("if ($) $");
-        loopCheck.condition = child.condition;
+        loopCheck.condition = node.condition;
         loopCheck.thenPart = this.branchStmt(loopStart).stmt;
         // transfer comments.
-        loopCheck.srcs[0] = child.srcs[1].replace(/^while/, 'if');
+        loopCheck.srcs[0] = node.srcs[1].replace(/^while/, 'if');
         loopCheck.thenPart.trailingComment =
             removeTokens(src, tkn.RIGHT_PAREN, tkn.SEMICOLON, tkn.END);
         this.add(loopCheck, '');
         this.addBranch(this.stack.length);
-        if (child.trailingComment) {
-            this.addComment(child.trailingComment);
+        if (node.trailingComment) {
+            this.addComment(node.trailingComment);
         }
 
-        fixupJumps(this.breakFixup, this.stack.length, child);
-        fixupJumps(this.continueFixup, loopContinue, child);
+        fixupJumps(this.breakFixup, this.stack.length, node);
+        fixupJumps(this.continueFixup, loopContinue, node);
         this.newInternalCont();
     };
-    YieldVisitor.prototype[tkn.WHILE] = function(child, src) {
+    YieldVisitor.prototype[tkn.WHILE] = function(node, src) {
         console.assert(src==='');
-        child.condition = Shaper.traverse(child.condition, this,
-                                          new Ref(child, 'condition'));
+        node.condition = Shaper.traverse(node.condition, this,
+                                          new Ref(node, 'condition'));
         var loopStart = this.stack.length;
         this.addBranch(loopStart);
         this.newInternalCont();
 
         // top of loop: check the condition.
         var loopCheck = Shaper.parse("if (!($)) $");
-        loopCheck.condition.children[0].children[0] = child.condition;
+        loopCheck.condition.children[0].children[0] = node.condition;
         var branchFixup = this.branchStmt(-1);
         loopCheck.thenPart = branchFixup.stmt;
         // transfer comments.
-        Shaper.cloneComments(loopCheck, child);
-        loopCheck.srcs[0] = child.srcs[0].replace(/^while/, 'if');
+        Shaper.cloneComments(loopCheck, node);
+        loopCheck.srcs[0] = node.srcs[0].replace(/^while/, 'if');
         this.add(loopCheck, '');
 
-        this.visit(child.body, '');
+        this.visit(node.body, '');
         if (this.canFallThrough) {
             this.addBranch(loopStart);
         }
 
         // fixup loop check
         fixupJumps([branchFixup], this.stack.length);
-        fixupJumps(this.breakFixup, this.stack.length, child);
-        fixupJumps(this.continueFixup, loopStart, child);
+        fixupJumps(this.breakFixup, this.stack.length, node);
+        fixupJumps(this.continueFixup, loopStart, node);
         this.newInternalCont();
     };
     YieldVisitor.prototype[tkn.FOR_IN] = function(node, src) {
         console.assert(false, "should have been removed in previous pass");
     };
-    YieldVisitor.prototype[tkn.FOR] = function(child, src) {
+    YieldVisitor.prototype[tkn.FOR] = function(node, src) {
         var setup;
 
         // fixup comments
-        var extraComment = child.leadingComment || '';
-        extraComment += child.srcs.slice(
-            0, 1+(child.setup?1:0)+(child.condition?1:0)+(child.update?1:0)).
+        var extraComment = node.leadingComment || '';
+        extraComment += node.srcs.slice(
+            0, 1+(node.setup?1:0)+(node.condition?1:0)+(node.update?1:0)).
             join('');
         extraComment = removeTokens(extraComment, tkn.FOR, tkn.LEFT_PAREN);
         var split = splitTokens(extraComment, tkn.SEMICOLON,
@@ -451,93 +451,93 @@ Shaper("yielder", function(root) {
         this.addComment(split[0]);
 
         // if there is setup, emit it first.
-        if (child.setup) {
-            child.setup = Shaper.traverse(child.setup, this,
-                                          new Ref(child, 'setup'));
-            this.add(Shaper.replace('$;', child.setup), '');
+        if (node.setup) {
+            node.setup = Shaper.traverse(node.setup, this,
+                                          new Ref(node, 'setup'));
+            this.add(Shaper.replace('$;', node.setup), '');
         }
         this.addComment(split[1]);
 
         // now proceed like a while loop
-        child.condition = Shaper.traverse(child.condition, this,
-                                          new Ref(child, 'condition'));
+        node.condition = Shaper.traverse(node.condition, this,
+                                          new Ref(node, 'condition'));
         var loopStart = this.stack.length;
         this.addBranch(loopStart);
         this.newInternalCont();
 
         // top of loop: check the condition.
         var loopCheck = Shaper.parse("if (!($)) $");
-        loopCheck.condition.children[0].children[0] = child.condition ||
+        loopCheck.condition.children[0].children[0] = node.condition ||
             Shaper.parse('true');
         var branchFixup = this.branchStmt(-1);
         loopCheck.thenPart = branchFixup.stmt;
         loopCheck.thenPart.trailingComment = split[2] + split[3];
-        if (child.condition) {
+        if (node.condition) {
             this.add(loopCheck, '');
         } else {
             this.addComment(loopCheck.thenPart.trailingComment);
         }
 
         // loop body
-        this.visit(child.body, '');
+        this.visit(node.body, '');
 
         // loop update
         if (this.canFallThrough) {
-            if (child.update) {
-                child.update = Shaper.traverse(child.update, this,
-                                               new Ref(child, 'update'));
-                var update = Shaper.replace('$;', child.update);
+            if (node.update) {
+                node.update = Shaper.traverse(node.update, this,
+                                               new Ref(node, 'update'));
+                var update = Shaper.replace('$;', node.update);
                 this.add(update, '');
             }
             this.addBranch(loopStart);
-        } else if (child.update) {
-            // transfer comments from child.update
-            this.addComment(removeAllTokens(child.update));
+        } else if (node.update) {
+            // transfer comments from node.update
+            this.addComment(removeAllTokens(node.update));
         }
-        if (child.trailingComment) {
-            this.addComment(child.trailingComment);
+        if (node.trailingComment) {
+            this.addComment(node.trailingComment);
         }
         this.addComment(src);
 
         // fixup loop check
         fixupJumps([branchFixup],this.stack.length);
-        fixupJumps(this.breakFixup, this.stack.length, child);
-        fixupJumps(this.continueFixup, loopStart, child);
-        if (child.formerly) { // handle converted for-in loops
-            fixupJumps(this.breakFixup, this.stack.length, child.formerly);
-            fixupJumps(this.continueFixup, loopStart, child.formerly);
+        fixupJumps(this.breakFixup, this.stack.length, node);
+        fixupJumps(this.continueFixup, loopStart, node);
+        if (node.formerly) { // handle converted for-in loops
+            fixupJumps(this.breakFixup, this.stack.length, node.formerly);
+            fixupJumps(this.continueFixup, loopStart, node.formerly);
         }
         this.newInternalCont();
     };
-    YieldVisitor.prototype[tkn.IF] = function(child, src) {
-        child.condition = Shaper.traverse(child.condition, this,
-                                          new Ref(child, 'condition'));
+    YieldVisitor.prototype[tkn.IF] = function(node, src) {
+        node.condition = Shaper.traverse(node.condition, this,
+                                          new Ref(node, 'condition'));
         var ifLoc = this.stack.length - 1, b;
-        this.add(child, '');
+        this.add(node, '');
         this.canFallThrough = false; // both sides of IF will get returns
 
         var thenPart = this.stack.length;
         this.newInternalCont();
-        this.visit(child.thenPart, child.elsePart ? '' : src);
+        this.visit(node.thenPart, node.elsePart ? '' : src);
         var thenPlace = this.canFallThrough ?
             this.addBranch(this.stack.length) : null /*optimization*/;
         // replace original thenPart with branch to continuation
         b = this.branchStmt(thenPart);
-        child.thenPart = b.stmt;
+        node.thenPart = b.stmt;
         this.optBranch(ifLoc, b);
 
-        if (child.elsePart) {
+        if (node.elsePart) {
             var elsePart = this.stack.length;
             this.newInternalCont();
-            this.visit(child.elsePart, src);
+            this.visit(node.elsePart, src);
             if (this.canFallThrough) {
                 this.addBranch(this.stack.length);
             }
             // replace original elsePart with branch to continuation
             b = this.branchStmt(elsePart);
-            child.elsePart = b.stmt;
-            if (child.srcs[2].length===4) {
-                child.srcs[2] += ' '; // ensure token separation
+            node.elsePart = b.stmt;
+            if (node.srcs[2].length===4) {
+                node.srcs[2] += ' '; // ensure token separation
             }
             this.optBranch(ifLoc, b);
             // fixup then part
@@ -545,9 +545,9 @@ Shaper("yielder", function(root) {
                 fixupJumps([thenPlace], this.stack.length);
             }
         } else {
-            console.assert(child.srcs.length===3);
-            child.elsePart = this.branchStmt(this.stack.length).stmt;
-            child.srcs.splice(2, 0, ' else ');
+            console.assert(node.srcs.length===3);
+            node.elsePart = this.branchStmt(this.stack.length).stmt;
+            node.srcs.splice(2, 0, ' else ');
         }
         this.newInternalCont();
     };
