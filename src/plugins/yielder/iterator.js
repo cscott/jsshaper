@@ -2,7 +2,9 @@
 
 StopIteration = require('stopiteration.js');
 
-Iterator = function(o, keysOnly) {
+// XXX NOTE that the 'valuesOnly' parameter is not compatible with
+//     mozilla's implementation.
+Iterator = function(o, keysOnly, valuesOnly) {
   var it, keys, k, undef;
   if (o===undef || o===null) {
     throw TypeError(o+" has no properties");
@@ -26,7 +28,7 @@ Iterator = function(o, keysOnly) {
           break;
       if (k < keys.length) {
         key = keys[k++];
-        return keysOnly ? key : [ key, o[key] ];
+        return keysOnly ? key : valuesOnly ? o[key] : [ key, o[key] ];
       }
       keys = o = null; // free resources
       throw StopIteration;

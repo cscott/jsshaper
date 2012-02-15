@@ -850,7 +850,8 @@ Shaper("yielder", function(root) {
             if (node.type === tkn.FOR_IN) {
               // convert to use iterator
               var it = gensym('it'), e = gensym('e');
-              var newFor = Shaper.replace('for(var '+it+'=Iterator($,true);;){'+
+              var param=(node.isEach ? "false,true" : "true");
+              var newFor = Shaper.replace('for(var '+it+'=Iterator($,'+param+');;){'+
                                           'try { $='+it+'.next(); } '+
                                           'catch ('+e+') { '+
                                           'if ('+e+'===StopIteration) break; '+
@@ -862,6 +863,11 @@ Shaper("yielder", function(root) {
               newFor.labels = node.labels;
               Shaper.cloneComments(newFor, node);
               newFor.srcs[0] = node.srcs[0];
+              if (node.isEach) {
+                  newFor.srcs[0] = 'for' +
+                      removeTokens(node.srcs[0], tkn.FOR,
+                                   tkn.IDENTIFIER/*each*/);
+              }
               newFor.srcs[1] =
                   removeTokens(node.srcs[1], tkn.IN, tkn.END) +
                   newFor.srcs[1] +
