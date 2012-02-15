@@ -30,7 +30,8 @@ checklines-%: tests/%.yielder.js
 
 test: $(patsubst tests/%.expected,check-%,$(wildcard tests/*.expected)) \
       $(patsubst tests/%.expected,checklines-%,$(wildcard tests/*.expected)) \
-      $(patsubst tests/%.expected,checkrhino-%,$(wildcard tests/*.expected)) \
+      $(filter-out checkrhino-try3 checkrhino-array,\
+      $(patsubst tests/%.expected,checkrhino-%,$(wildcard tests/*.expected))) \
 	checklines-comments checklines-simple
 
 .SECONDARY: # preserve generated *.yielder.js files

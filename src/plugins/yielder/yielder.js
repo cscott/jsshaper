@@ -773,6 +773,54 @@ Shaper("yielder", function(root) {
         return node;
     }
 
+    // rewrite generator expressions and array comprehensions
+    root = Shaper.traverse(root, {
+        generator: function(node) {
+            var forLoop = node.tail.children[0];
+            var guard = node.tail.guard || Shaper.parse('true');
+            var s = Shaper.parse('(function(){'+
+                                 'var '+forLoop.iterator.name+';'+
+                                 '$})()');
+            s = Shaper.replace(s, forLoop);
+            var y = Shaper.parse('function _(){if ($) yield ($);}').
+                body.children[0];
+            forLoop.body = Shaper.replace(y, guard, node.expression);
+            // _iterator is not a varDecl.
+            forLoop._iterator = Shaper.parse(forLoop.iterator.name);
+            delete forLoop.varDecl;
+            // have to fix up forLoop's srcs array, weird
+            var src = splitTokens(forLoop.srcs[0], tkn.FOR);
+            var src0 = src[0]+'for ';
+            if (forLoop.isEach) {
+                src = splitTokens(src[1], tkn.IDENTIFIER/*each*/);
+                src0 += src[0]+'each ';
+            }
+            src = removeTokens(src[1], tkn.LEFT_PAREN, tkn.IDENTIFIER);
+            src0 += '(';
+            forLoop.srcs.splice(0, 1, src0, src);
+            forLoop.srcs.push('');
+            return s;
+        },
+        post: function(node, ref) {
+            var s;
+            if (node.type === tkn.ARRAY_COMP) {
+                s = Shaper.parse('(($).toArray())');
+                s = Shaper.replace(s, this.generator(node));
+                // have to remove trailing '[' from parent's src
+                console.assert(ref.properties.length===2 &&
+                               ref.properties[0]==='children');
+                var n = +ref.properties[1];
+                ref.base.srcs[n] = ref.base.srcs[n].replace(/\[(\s*)$/, '$1');
+                return ref.set(s);
+            }
+            if (node.type === tkn.GENERATOR) {
+                s = Shaper.parse('($)');
+                s = Shaper.replace(s, this.generator(node));
+                return ref.set(s);
+            }
+        }
+    });
+
     // find functions containing 'yield' and take note of uses of
     // 'arguments' and 'catch' as well.  Register all symbols so that
     // gensym is guaranteed to be safe.
@@ -837,6 +885,7 @@ Shaper("yielder", function(root) {
             }
         }
     });
+
     // gensym
     $Generator = gensym('Generator');
     $stop = gensym('stop');
@@ -844,9 +893,10 @@ Shaper("yielder", function(root) {
     $pc = gensym('pc');
     $ex = gensym('ex');
     $val = gensym('val');
+
     // rewrite for-in loops
     root = Shaper.traverse(root, {
-        pre: function(node, ref) {
+        post: function(node, ref) {
             if (node.type === tkn.FOR_IN) {
               // convert to use iterator
               var it = gensym('it'), e = gensym('e');
@@ -858,7 +908,7 @@ Shaper("yielder", function(root) {
                                           'throw '+e+'; }'+
                                           '$}',
                                           node.object,
-                                          node.varDecl || node.iterator,
+                                          node.varDecl || node._iterator,
                                           node.body);
               newFor.labels = node.labels;
               Shaper.cloneComments(newFor, node);
@@ -884,6 +934,7 @@ Shaper("yielder", function(root) {
           }
         }
     });
+
     // rewrite 'function foo(...)' to 'var foo = function(...)'
     // DO THIS GLOBALLY (not just inside generators).
     // THIS ALTERS THE SEMANTICS OF THE LANGUAGE.
