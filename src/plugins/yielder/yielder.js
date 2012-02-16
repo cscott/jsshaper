@@ -929,6 +929,11 @@ Shaper("yielder", function(root) {
               // convert to use iterator
               var it = gensym('it'), e = gensym('e');
               var param=(node.isEach ? "false,true" : "true");
+              // XXX gjs closes generators, but iterators don't have close
+              //     methods.  gjs/spidermonkey seems to decide whether to
+              //     call the close method based on whether the $it object
+              //     is a generator object; Object.create($it) does not cause
+              //     for() to call the close method.
               var newBlock=Shaper.replace('try{'+
                                           'var '+it+'=Iterator($,'+param+');'+
                                           'for(;;){'+
@@ -937,12 +942,14 @@ Shaper("yielder", function(root) {
                                           'if ('+e+'===StopIteration) break; '+
                                           'throw '+e+'; }'+
                                           '$}'+
-                                          '}finally{'+it+'.close();}',
+                                          '}finally{'+
+                                          'if (typeof('+it+'.close)==='+
+                                          '"function") '+it+'.close();}',
                                           node.object,
                                           node.varDecl || node._iterator,
                                           node.body);
               var newFor = newBlock.tryBlock.children[1];
-              newFor.labels = node.labels;//XXX
+              newFor.labels = node.labels;
               Shaper.cloneComments(newFor, node);
               newFor.srcs[0] = node.srcs[0];
               if (node.isEach) {
