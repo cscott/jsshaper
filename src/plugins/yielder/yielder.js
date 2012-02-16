@@ -42,9 +42,9 @@ Shaper("yielder", function(root) {
     }
     function funcBodyAdd(body, stmt, src) {
         if (Array.isArray(stmt)) {
-            for (var i=0; i<stmt.length; i++) {
-                funcBodyAdd(body, stmt[i], (i===(stmt.length-1))?src:'');
-            }
+            stmt.forEach(function(s, i) {
+                funcBodyAdd(body, s, (i===(stmt.length-1))?src:'');
+            });
         } else {
             body.children.push(stmt);
             body.srcs.push(src);
@@ -253,9 +253,9 @@ Shaper("yielder", function(root) {
         visitBlock: function(children, srcs) {
             var i;
             console.assert(children.length === srcs.length);
-            for (i=0; i<children.length; i++) {
-                this.visit(children[i], srcs[i]);
-            }
+            children.forEach(function(child, i) {
+                this.visit(child, srcs[i]);
+            }.bind(this));
         },
 
         // rewrite arguments, catch expressions, var nodes, etc.
@@ -626,8 +626,7 @@ Shaper("yielder", function(root) {
         var defaultLabel=null;
         var nextTest = [r], nextBody = [];
 
-        for (i=0; i<node.cases.length; i++) {
-            var c = node.cases[i];
+        node.cases.forEach(function(c, i) {
             var csrc = node.srcs[i+2];
             if (i===node.cases.length-1) {
                 csrc = removeTokens(csrc, tkn.RIGHT_CURLY, tkn.END) + src;
@@ -667,13 +666,15 @@ Shaper("yielder", function(root) {
             }
             if (c.trailingComment) { this.addComment(c.trailingComment); }
             this.newInternalCont();
-        }
+        }.bind(this));
+
         // default case.
         if (defaultLabel!==null) {
             fixupJumps(nextTest, defaultLabel);
         } else {
             fixupJumps(nextTest, this.stack.length-1);
         }
+
         // fall through; break
         fixupJumps(this.breakFixup, this.stack.length-1, node);
         fixupJumps(nextBody, this.stack.length-1);
@@ -727,7 +728,7 @@ Shaper("yielder", function(root) {
         }
 
         // catch blocks
-        for (i=0; i<node.catchClauses.length; i++) {
+        node.catchClauses.forEach(function(cc, i) {
             var catchStart = this.stack.length;
             c = this.tryStack[this.tryStack.length-1];
             c.inCatch = true;
@@ -743,7 +744,6 @@ Shaper("yielder", function(root) {
                              ');');
             this.add(s, '');
             // assign thrown exception to (renamed) variable in catch
-            var cc = node.catchClauses[i];
             s = Shaper.parse(cc.yieldVarName+' = '+$ex+'.ex;');
             Shaper.cloneComments(s, cc._name);
             var extra = (cc.leadingComment||'') +
@@ -764,7 +764,7 @@ Shaper("yielder", function(root) {
                 addFallThroughBranch();
             }
             this.tryStack.pop();
-        }
+        }.bind(this));
 
         // after try / finally
         var finallyLabel = this.stack.length;
@@ -880,9 +880,9 @@ Shaper("yielder", function(root) {
 
         // hollow out old function and replace it with new function body
         funcBodyStart(node.body, old_srcs[0]);
-        for (i=0; i<stmts.length; i++) {
-            funcBodyAdd(node.body, stmts[i], '');
-        }
+        stmts.forEach(function(stmt) {
+            funcBodyAdd(node.body, stmt, '');
+        });
         funcBodyFinish(node.body, old_srcs[old_srcs.length-1]);
 
         return node;
@@ -972,9 +972,9 @@ Shaper("yielder", function(root) {
                 this.fns.push({node: node, ref: ref, vars: [], caught: [],
                                'yield': false, 'arguments': false,
                                'catch': false, 'finally': false});
-                for (i=0; i<node.params.length; i++) {
-                    registersym(node.params[i]);
-                }
+                node.params.forEach(function(p) {
+                    registersym(p);
+                });
             }
             var fn = this.fns[this.fns.length-1];
             if (node.type === tkn.YIELD) {
@@ -985,15 +985,14 @@ Shaper("yielder", function(root) {
                 }
             }
             if (node.type === tkn.VAR) {
-                for (i=0; i<node.children.length; i++) {
-                    var child = node.children[i];
+                node.children.forEach(function(child) {
                     if (child.type===tkn.ASSIGN) {
                         child = child.children[0];
                     }
                     console.assert(child.type===tkn.IDENTIFIER);
                     fn.vars.push(child.value);
                     registersym(child.value);
-                }
+                });
             }
             if (node.type === tkn.CATCH) {
                 fn['catch'] = true;
@@ -1165,15 +1164,13 @@ Shaper("yielder", function(root) {
                 // remove mappings for 'var' and function parameters
                 this.varenv.push();
                 // var-bound variables
-                var v = node.yield_info.vars, i;
-                for (i=0; i<v.length; i++) {
-                    this.varenv.remove(v[i]);
-                }
+                node.yield_info.vars.forEach(function(v) {
+                    this.varenv.remove(v);
+                }.bind(this));
                 // function parameters
-                v = node.params;
-                for (i=0; i<v.length; i++) {
-                    this.varenv.remove(v[i]);
-                }
+                node.params.forEach(function(v) {
+                    this.varenv.remove(v);
+                }.bind(this));
                 // if this is a generator, add new name for 'arguments'
                 if (node.yield_info['yield']) {
                     this.varenv.put('arguments', $arguments);
@@ -1253,8 +1250,8 @@ Shaper("yielder", function(root) {
         }
     });
     // rewrite generator functions
-    for (var i=0; i<yieldfns.length; i++) {
-        rewriteGeneratorFunc(yieldfns[i].node, yieldfns[i], yieldfns[i].ref);
-    }
+    yieldfns.forEach(function(yieldfn) {
+        rewriteGeneratorFunc(yieldfn.node, yieldfn, yieldfn.ref);
+    });
     return root;
 });
