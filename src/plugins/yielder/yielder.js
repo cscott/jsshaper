@@ -200,8 +200,7 @@ Shaper("yielder", function(root) {
             var frame = Shaper.parse('switch(_){case '+this.stack.length+':{}}'
                                     ).cases[0];
 
-            var new_top = { 'case': frame, body: frame.statements,
-                            catcher:false };
+            var new_top = { 'case': frame, body: frame.statements };
 
             // find active try block
             var tb = this.currentTry();
@@ -218,8 +217,7 @@ Shaper("yielder", function(root) {
                 funcBodyStart(c);
 
                 // if exception caught, branch to catch or finally block
-                var caught = this.tryStack[this.tryStack.length-1].inCatch;
-                s = Shaper.parse($ex+'={ex:'+v+(caught?',caught:true':'')+'};');
+                s = Shaper.parse($ex+'={ex:'+v+'};');
                 funcBodyAdd(c, s, '');
                 s = this.branchStmt(-1);
                 funcBodyAdd(c, s.stmt.children, '');
@@ -315,8 +313,7 @@ Shaper("yielder", function(root) {
                     this.breakFixup : this.continueFixup;
                 if (finallyCount > 0) {
                     var ss=Shaper.parse($ex+'={fall:0,level:'+(finallyCount-1)+
-                                        (firstFinally.inCatch ? ',caught:true':
-                                         '') + '};');
+                                        '};');
                     var fall = ss.expression.children[1].children[0];
                     fixup.push({ref:new Ref(fall, 'children', 1),
                                 target: node.target});
@@ -619,7 +616,7 @@ Shaper("yielder", function(root) {
         if (node.leadingComment) { this.addComment(node.leadingComment); }
         this.addComment(removeTokens(node.srcs[0],
                                      tkn.SWITCH, tkn.LEFT_PAREN, tkn.END));
-        this.add(s);
+        this.add(s, '');
         r = this.addBranch(-1);
         this.addComment(removeTokens(node.srcs[1],
                                      tkn.RIGHT_PAREN, tkn.LEFT_CURLY, tkn.END));
@@ -690,45 +687,46 @@ Shaper("yielder", function(root) {
         }
         this.addBranch(this.stack.length);
 
+        var hasFinally = !!node.finallyBlock;
         var finallyFixups = [];
         var postTryFixups = [];
-
-        // we always add a finally block to pop the catch scope, even if
-        // the try didn't originally have one.
-        this.tryStack.push({inCatch:false, isFinally:true,
-                            varName: node.finallyVarName,
-                            catchFixups: finallyFixups});
-        // mark that we're entering a try block w/ a finally, so breaks will
-        // unwind properly
-        this.finallyStack.push({'finally':true, fixups:finallyFixups});
-
-        var addFallThroughBranch = function(caught) {
-            // level is 0 here because we're simply falling through
-            // (not doing a non-local break)
-            var s = Shaper.parse($ex+'={fall:0,level:0'+
-                                 (caught?',caught:true':'')+'};');
-            var fall = s.expression.children[1].children[0];
-            postTryFixups.push({ref:new Ref(fall, 'children', 1)});
-            this.add(s);
-            finallyFixups.push(this.addBranch(-1));
-        }.bind(this);
+        var addFallThroughBranch;
+        if (hasFinally) {
+            this.tryStack.push({inCatch:false, isFinally:true,
+                                varName: node.finallyVarName,
+                                catchFixups: finallyFixups});
+            // mark that we're entering a try block w/ a finally, so breaks
+            // will unwind properly
+            this.finallyStack.push({'finally':true, fixups:finallyFixups});
+            addFallThroughBranch = function() {
+                // level is 0 here because we're simply falling through
+                // (not doing a non-local break)
+                var s = Shaper.parse($ex+'={fall:0,level:0};');
+                var fall = s.expression.children[1].children[0];
+                postTryFixups.push({ref:new Ref(fall, 'children', 1)});
+                this.add(s, '');
+                finallyFixups.push(this.addBranch(-1));
+            }.bind(this);
+        } else {
+            addFallThroughBranch = function() {
+                // record fixup
+                postTryFixups.push(this.addBranch(-1));
+            }.bind(this);
+        }
 
         for (i=node.catchClauses.length-1; i>=0; i--) {
             c = node.catchClauses[i];
             this.tryStack.push({varName:c.varName, inCatch:false,
-                                catchFixups: [], finallyFixups: finallyFixups});
+                                catchFixups: []});
         }
 
         this.newInternalCont();
         this.visit(node.tryBlock, '');
         if (this.canFallThrough) {
-            addFallThroughBranch(false/*not caught*/);
+            addFallThroughBranch();
         }
 
         // catch blocks
-        console.assert(node.catchClauses.length<=1,
-                       "scope cleanup probably is wrong for multiple catches");
-        this.finallyStack[this.finallyStack.length-1].inCatch = true;
         for (i=0; i<node.catchClauses.length; i++) {
             var catchStart = this.stack.length;
             c = this.tryStack[this.tryStack.length-1];
@@ -736,6 +734,10 @@ Shaper("yielder", function(root) {
             fixupJumps(c.catchFixups, catchStart);
 
             this.newInternalCont();
+            // bail if this is a stopiteration exception!
+            s = Shaper.parse('if ('+$ex+'.ex==='+$stop+') '+
+                             '{ throw '+$ex+'.ex; }');
+            this.add(s, '');
             // create new scope
             s = Shaper.parse(this.scopeName+'=Object.create('+this.scopeName+
                              ');');
@@ -749,73 +751,67 @@ Shaper("yielder", function(root) {
             s.leadingComment = extra + (s.leadingComment||'');
             this.add(s, '');
 
-            // bail if this is a stopiteration exception!
-            s = Shaper.parse('if ('+cc.yieldVarName+'==='+$stop+') '+
-                             '{ throw '+cc.yieldVarName+'; }');
-            this.add(s, '');
-
-            this.visit(cc.block, '');
-            this.addComment("/*end of catch block*/");
+            // create new try/finally block to ensure that every exit from
+            // cc.block will pop the scope.
+            s = Shaper.parse('try {} finally { '+
+                             this.scopeName+'=Object.getPrototypeOf('+
+                             this.scopeName+'); }');
+            s.tryBlock = cc.block;
+            s.finallyVarName = cc.finallyVarName;
+            this.visit(s, '');
 
             if (this.canFallThrough) {
-                addFallThroughBranch(true/*caught*/);
+                addFallThroughBranch();
             }
             this.tryStack.pop();
         }
 
-        // finally
+        // after try / finally
         var finallyLabel = this.stack.length;
         fixupJumps(finallyFixups, finallyLabel);
-        this.finallyStack.pop();
+        if (hasFinally) {
+            this.tryStack.pop();
+            this.finallyStack.pop();
+            this.newInternalCont();
+            this.add(Shaper.parse(node.finallyVarName+' = '+$ex+';'), '');
 
-        c = this.tryStack.pop();
-        this.newInternalCont();
-        this.add(Shaper.parse(node.finallyVarName+' = '+$ex+';'), '');
-
-        // pop the catch scope
-        if (this.scopeName) {
-            this.add(Shaper.parse('if ('+node.finallyVarName+'.caught) '+
-                                  this.scopeName+'=Object.getPrototypeOf('+
-                                  this.scopeName+');'), '');
-        }
-        this.canFallThrough = true;
-
-        if (node.finallyBlock) {
+            this.canFallThrough = true;
             this.visit(node.finallyBlock, '');
-        }
 
-        if (this.canFallThrough) {
-            // throw, or jump from finally block to fall through or break
-            s = Shaper.parse('if ('+node.finallyVarName+'.fall) {'+
-                             '}else{throw '+node.finallyVarName+'.ex;}');
-            var gotoFall =
-                this.branchStmt(Shaper.parse(node.finallyVarName+'.fall')).stmt;
-            // is there a surrounding finally?
-            var nextFinally;
-            for (i=this.finallyStack.length-1; i>=0; i--) {
-                if (this.finallyStack[i]['finally']) {
-                    nextFinally = this.finallyStack[i];
-                    break;
+            if (this.canFallThrough) {
+                // throw, or jump from finally block to fall through or break
+                s = Shaper.parse('if ('+node.finallyVarName+'.fall) {'+
+                                 '}else{throw '+node.finallyVarName+'.ex;}');
+                var gotoFall =
+                    this.branchStmt(Shaper.parse(node.finallyVarName+'.fall')).
+                    stmt;
+                // is there a surrounding finally?
+                var nextFinally;
+                for (i=this.finallyStack.length-1; i>=0; i--) {
+                    if (this.finallyStack[i]['finally']) {
+                        nextFinally = this.finallyStack[i];
+                        break;
+                    }
                 }
+                if (nextFinally) {
+                    var ss = Shaper.parse('{if('+node.finallyVarName+'.level){'+
+                                          node.finallyVarName+'.level--;'+
+                                          $ex+'='+node.finallyVarName+';'+
+                                          '$'+
+                                          '} else $}');
+                    var b = this.branchStmt(-1);
+                    nextFinally.fixups.push(b);
+                    ss = Shaper.replace(ss, b.stmt, gotoFall);
+                    this.optBranch(this.stack.length-1, b);
+                    s.thenPart = ss;
+                } else {
+                    s.thenPart = gotoFall;
+                }
+                this.add(s, '');
+                this.canFallThrough = false;
             }
-            if (nextFinally) {
-                var ss = Shaper.parse('{if ('+node.finallyVarName+'.level) {'+
-                                      node.finallyVarName+'.level--;'+
-                                      node.finallyVarName+'.caught='+
-                                      String(!!nextFinally.inCatch)+';'+
-                                      $ex+'='+node.finallyVarName+';'+
-                                      '$'+
-                                      '} else $}');
-                var b = this.branchStmt(-1);
-                nextFinally.fixups.push(b);
-                ss = Shaper.replace(ss, b.stmt, gotoFall);
-                this.optBranch(this.stack.length-1, b);
-                s.thenPart = ss;
-            } else {
-                s.thenPart = gotoFall;
-            }
-            this.add(s, '');
-            this.canFallThrough = false;
+        } else {
+            console.assert(finallyFixups.length===0);
         }
 
         // after try
@@ -1218,6 +1214,9 @@ Shaper("yielder", function(root) {
                     // add this to the environment
                     node.yieldVarName = yi.scopeName+'.'+node.varName;
                     this.varenv.put(node.varName, node.yieldVarName);
+                    // we'll be generating a finally block to free the scope
+                    node.finallyVarName = gensym('finally');
+                    yi.vars.push(node.finallyVarName);
                 } else if (this.varenv.has(node.varName)) {
                     // this catch shadows a previously-caught variable;
                     // remove it from the environment.
