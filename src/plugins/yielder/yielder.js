@@ -929,26 +929,15 @@ Shaper("yielder", function(root) {
               // convert to use iterator
               var it = gensym('it'), e = gensym('e');
               var param=(node.isEach ? "false,true" : "true");
-              // XXX gjs closes generators, but iterators don't have close
-              //     methods.  gjs/spidermonkey seems to decide whether to
-              //     call the close method based on whether the $it object
-              //     is a generator object; Object.create($it) does not cause
-              //     for() to call the close method.
-              var newBlock=Shaper.replace('try{'+
-                                          'var '+it+'=Iterator($,'+param+');'+
-                                          'for(;;){'+
+              var newFor = Shaper.replace('for(var '+it+'=Iterator($,'+param+');;){'+
                                           'try { $='+it+'.next(); } '+
                                           'catch ('+e+') { '+
                                           'if ('+e+'===StopIteration) break; '+
                                           'throw '+e+'; }'+
-                                          '$}'+
-                                          '}finally{'+
-                                          'if (typeof('+it+'.close)==='+
-                                          '"function") '+it+'.close();}',
+                                          '$}',
                                           node.object,
                                           node.varDecl || node._iterator,
                                           node.body);
-              var newFor = newBlock.tryBlock.children[1];
               newFor.labels = node.labels;
               Shaper.cloneComments(newFor, node);
               newFor.srcs[0] = node.srcs[0];
@@ -957,19 +946,19 @@ Shaper("yielder", function(root) {
                       removeTokens(node.srcs[0], tkn.FOR,
                                    tkn.IDENTIFIER/*each*/);
               }
-              newFor.srcs[0] +=
+              newFor.srcs[1] =
                   removeTokens(node.srcs[1], tkn.IN, tkn.END) +
-                  ';;'+
-                  node.srcs[2];
-              newFor.srcs[1] = node.srcs[3];
+                  newFor.srcs[1] +
+                  removeTokens(node.srcs[2], tkn.RIGHT_PAREN, tkn.END);
+              newFor.srcs[2] = node.srcs[3];
               newFor.formerly = node; // for matching up break/continue
               // looks better if we move the trailing comment from the old body
               // to the new body
               var trailing = node.body.trailingComment || '';
               delete node.body.trailingComment;
-              newBlock.trailingComment = trailing +
+              newFor.body.trailingComment = trailing +
                   (newFor.body.trailingComment || '');
-              return ref.set(newBlock);
+              return ref.set(newFor);
           }
         }
     });

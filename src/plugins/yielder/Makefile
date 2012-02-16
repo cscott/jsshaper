@@ -42,11 +42,12 @@ checklines-all:\
 	checklines-comments checklines-simple
 # rhino's JS implementation is a little buggy; ignore some tests.
 checkrhino-all:\
-      $(filter-out checkrhino-try3 checkrhino-array checkrhino-forin \
+      $(filter-out checkrhino-try3 checkrhino-array \
                    checkrhino-break checkrhino-break2,\
       $(patsubst tests/%.expected,checkrhino-%,$(wildcard tests/*.expected)))
 checkgjs-all:\
-      $(patsubst tests/%.expected,checkgjs-%,$(wildcard tests/*.expected)) \
+      $(filter-out checkgjs-forin, \
+      $(patsubst tests/%.expected,checkgjs-%,$(wildcard tests/*.expected)))
 
 test: check-all checklines-all checkgjs-all checkrhino-all
 
