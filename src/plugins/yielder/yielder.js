@@ -482,18 +482,18 @@ Shaper("yielder", function(root) {
         this.visit(node.body, '');
 
         // loop update
+        var loopUpdate = this.stack.length;
         if (this.canFallThrough) {
-            if (node.update) {
-                node.update = Shaper.traverse(node.update, this,
-                                               new Ref(node, 'update'));
-                var update = Shaper.replace('$;', node.update);
-                this.add(update, '');
-            }
-            this.addBranch(loopStart);
-        } else if (node.update) {
-            // transfer comments from node.update
-            this.addComment(removeAllTokens(node.update));
+            this.addBranch(loopUpdate);
         }
+        this.newInternalCont();
+        if (node.update) {
+            node.update = Shaper.traverse(node.update, this,
+                                          new Ref(node, 'update'));
+            var update = Shaper.replace('$;', node.update);
+            this.add(update, '');
+        }
+        this.addBranch(loopStart);
         if (node.trailingComment) {
             this.addComment(node.trailingComment);
         }
@@ -502,10 +502,10 @@ Shaper("yielder", function(root) {
         // fixup loop check
         fixupJumps([branchFixup],this.stack.length);
         fixupJumps(this.breakFixup, this.stack.length, node);
-        fixupJumps(this.continueFixup, loopStart, node);
+        fixupJumps(this.continueFixup, loopUpdate, node);
         if (node.formerly) { // handle converted for-in loops
             fixupJumps(this.breakFixup, this.stack.length, node.formerly);
-            fixupJumps(this.continueFixup, loopStart, node.formerly);
+            fixupJumps(this.continueFixup, loopUpdate, node.formerly);
         }
         this.newInternalCont();
     };
