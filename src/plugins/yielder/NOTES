@@ -34,6 +34,7 @@ function bat(arr) {
        } catch (e) {
          // [7]
          log(e);
+         escapes(function() { return e; });
          delete arr[i];
        } finally {
          // [8]
@@ -51,8 +52,8 @@ function bat(arr) {
 
 function bat(arr) {
   var $arguments = arguments; // necessary because original uses 'arguments'
-  var $catch$e;               // necessary because original has catch
-  var $finally;            // necessary because original has finally
+  var $scope$1=Object.create(null);// necessary because original has catch
+  var $finally;               // necessary because original has finally
   var $pc = 0;
   var i, j;
   return new Generator(function($stop, $ex, $val) {
@@ -107,7 +108,7 @@ function bat(arr) {
       }
     case 6: // internal
       try {
-        $pc=8; $ex={fall:true}; continue; // this falls through to finally
+          $pc=8; $ex={fall:9,level:0}; continue;// this falls through to finally
       } catch (e) {
         $pc=7; $ex={ex:e}; continue; // branch to catch [FALL THROUGH]
       }
@@ -116,20 +117,31 @@ function bat(arr) {
 
       // note that e has block-level scope; this is desugared out.
       try {
-        $catch$e = $ex.ex;
-        if ($catch$e===$stop) { throw $catch$e; }
-        log($catch$e);
+        if ($ex.ex===$stop) { throw $ex.ex; } // don't catch our StopIteration
+        $scope$1 = Object.create($scope$1);
+        $scope$1.e = $ex.ex;
+        log($scope$1.e);
+        escapes((function($scope$1){ // capture current scope
+            return function() { return $scope$1.e; };
+        })($scope$1));
         delete arr[i];
-        $catch$e = null; // free!
-        $pc=8; $ex={fall:true}; continue; // fall through to finally [FALL THRU]
+        $scope$1 = Object.getPrototypeOf($scope$1); // pop scope
+        $pc=8; $ex={fall:9}; continue; // fall through to finally [FALL THRU]
       } catch (e) {
+        $scope$1 = Object.getPrototypeOf($scope$1); // pop scope
         $pc=8; $ex={ex:e}; continue; // branch to finally [FALL THROUGH]
       }
     case 8: // internal, finally
       $finally = $ex;
       baz(i);
       if ($finally.fall) {
-        $pc=9; continue; // after try [OPTIMIZE: FALL THROUGH]
+          if ($finally.level) {
+              $finally.level--;
+              $ex = $finally;
+              $pc = ...; continue; // next finally up
+          } else {
+            $pc=$finally.fall; continue; // after try [can't optimize]
+          }
       } else {
         throw $finally.ex;
       }
@@ -319,3 +331,25 @@ Only create new $scope objects if the variable escapes; otherwise we can
 just gensym the symbol and use var-binding.
 
 ---
+try {
+  i = 0;
+  while(true) {
+      try {
+          if (!(i<5)) throw $w1$break;
+          throw $w1$continue;
+      } catch (e) {
+          if (e!==$w1$continue) throw e;
+      }
+      i += 1;
+  }
+} catch (e) {
+    if (e!==$w1$break) throw e;
+}
+---
+change catch conversion to rewrite with:
+  catch(e) { } ->
+  catch(e) { .. $scope = Object.create($scope, {e:{value:$ex}});
+             try { ... } finally { $scope = Object.getPrototypeOf($scope); } }
+
+change node.formerly to node.rewrittenTo and go through changing all
+node-targets where target.rewrittenTo exists.

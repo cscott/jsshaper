@@ -35,6 +35,7 @@ function bat(arr) {
                 }
             } catch (e) {
                 log(e);
+                escapes(function() { return e; });
                 delete arr[i];
             } finally {
                 baz(i);
