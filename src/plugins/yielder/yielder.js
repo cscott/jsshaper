@@ -1,10 +1,12 @@
 /*jshint globalstrict:true, eqeqeq:true, curly:true, latedef:true, newcap:true,
   undef:true, trailing:true */
-/*global require:false, console:false, print:false, tkn:false, Narcissus:false */
+/*global define:true, require:false, module:false, console:false, print:false */
+if (typeof define !== 'function') { var define = require('amdefine')(module); }
+
+define(['../../shaper', '../../ref', '../../narcissus', '../../tkn'],
+       function(Shaper, Ref, Narcissus, tkn) {
 "use strict"; "use restrict";
 
-var Ref = Ref || require("ref.js") || Ref;
-var Shaper = Shaper || require("shaper.js") || Shaper;
 var log = (typeof console !== "undefined") && console.log || print;
 
 // use a require('generator.js') in generated code, or assume that the
@@ -1268,4 +1270,7 @@ Shaper("yielder", function(root) {
         rewriteGeneratorFunc(yieldfn.node, yieldfn, yieldfn.ref);
     });
     return root;
+});
+
+    return Shaper.get("yielder");
 });

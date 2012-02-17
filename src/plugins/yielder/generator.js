@@ -1,4 +1,6 @@
-StopIteration = require('stopiteration.js');
+if (typeof define !== 'function') { var define = require('amdefine')(module); }
+
+define(['./stopiteration'], function(StopIteration) {
 
 function Generator(cont_func) {
     this._cont_func = cont_func;
@@ -47,6 +49,9 @@ Generator.prototype = {
     }
 };
 
-if (typeof exports !== "undefined") {
-    module.exports = Generator;
+if (typeof global !== "undefined") {
+    global.Generator = Generator;
 }
+
+return Generator;
+});

@@ -1,6 +1,7 @@
 // thunks to convert objects to iterators
+if (typeof define !== 'function') { var define = require('amdefine')(module); }
 
-StopIteration = require('stopiteration.js');
+define(['./stopiteration'], function(StopIteration) {
 
 // XXX NOTE that the 'valuesOnly' parameter is not compatible with
 //     mozilla's implementation.
@@ -47,6 +48,6 @@ Iterator.prototype = {
 if (typeof global !== "undefined") {
     global.Iterator = Iterator;
 }
-if (typeof exports !== "undefined") {
-    module.exports = Iterator;
-}
+
+return Iterator;
+});
