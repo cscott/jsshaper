@@ -458,7 +458,6 @@ Shaper("yielder", function(root) {
         this.newInternalCont();
     };
     YieldVisitor.prototype[tkn.WHILE] = function(node, src) {
-        console.assert(src==='');
         node.condition = Shaper.traverse(node.condition, this,
                                           new Ref(node, 'condition'));
         var loopStart = this.stack.length;
@@ -482,6 +481,7 @@ Shaper("yielder", function(root) {
         if (this.canFallThrough) {
             this.addBranch(loopStart);
         }
+        this.addComment(src);
 
         // fixup loop check
         fixupJumps([branchFixup], this.stack.length);
