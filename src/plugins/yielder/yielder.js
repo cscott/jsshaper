@@ -7,6 +7,10 @@ var Ref = Ref || require("ref.js") || Ref;
 var Shaper = Shaper || require("shaper.js") || Shaper;
 var log = (typeof console !== "undefined") && console.log || print;
 
+// use a require('generator.js') in generated code, or assume that the
+// global Generator has been defined?
+var LOCAL_GENERATOR=false;
+
 // converts functions containing yield/yield() to generators.
 Shaper("yielder", function(root) {
     var allsyms = Object.create(null);
@@ -828,7 +832,10 @@ Shaper("yielder", function(root) {
         var stmts = [];
         var i;
         // export the Generator and StopIteration
-        stmts.push(Shaper.parse('var '+$Generator+' = require("generator.js");'));
+        if (LOCAL_GENERATOR) {
+            stmts.push(Shaper.parse('var '+$Generator+
+                                    ' = require("generator.js");'));
+        }
         stmts.push(Shaper.parse('var '+$pc+' = 0;'));
         if (props.vars.length > 0) {
             stmts.push(Shaper.parse("var "+props.vars.join(',')+";"));
@@ -1025,12 +1032,16 @@ Shaper("yielder", function(root) {
     });
 
     // gensym
-    $Generator = gensym('Generator');
     $stop = gensym('stop');
     $arguments = gensym('arguments');
     $pc = gensym('pc');
     $ex = gensym('ex');
     $val = gensym('val');
+    if (LOCAL_GENERATOR) {
+        $Generator = gensym('Generator');
+    } else {
+        $Generator = "Generator";
+    }
 
     // rewrite for-in loops
     root = Shaper.traverse(root, {
