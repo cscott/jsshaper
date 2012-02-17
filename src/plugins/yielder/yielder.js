@@ -1008,7 +1008,7 @@ Shaper("yielder", function(root) {
                 fn['arguments'] = true;
             }
             if (node.type === tkn.IDENTIFIER) {
-                // again conservative: gets property names, too.
+                // again conservative: gets property and label names, too.
                 registersym(node.value);
             }
         },
@@ -1183,6 +1183,12 @@ Shaper("yielder", function(root) {
                 // only traverse 1st child; second is not an expression
                 Shaper.traverse(node.children[0], this,
                                 new Ref(node, 'children', 0));
+                return "break";
+            }
+            if (node.type===tkn.LABEL) {
+                // only traverse statement; label is not a name.
+                Shaper.traverse(node.statement, this,
+                                new Ref(node, 'statement'));
                 return "break";
             }
             if (node.type===tkn.PROPERTY_INIT) {

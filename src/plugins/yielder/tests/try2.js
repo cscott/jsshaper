@@ -37,6 +37,9 @@ function foo(f) {
         var h = function() {
             return arguments[0];
         };
+        e: while (true) { // this is a label, not foo's variable 'e'
+            break e; // this is a label, not a variable
+        }
         log(a());
         log(b(42));
         log(c());
