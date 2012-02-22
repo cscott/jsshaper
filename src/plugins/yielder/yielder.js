@@ -944,19 +944,6 @@ Shaper("yielder", function(root) {
             if (node.type === tkn.ARRAY_COMP) {
                 s = Shaper.parse('(($).toArray())');
                 s = Shaper.replace(s, this.generator(node));
-                // have to remove trailing '[' from parent's src
-                var n;
-                if (ref.properties.length===2 &&
-                    ref.properties[0]==='children') {
-                    n = +ref.properties[1];
-                } else if (ref.base.srcs.length===2) {
-                    n = 0;
-                } else {
-                    // can't find the right srcs element =(
-                    console.assert(false, ref);
-                }
-                console.assert(ref.base.srcs[n].indexOf('[')>=0);
-                ref.base.srcs[n] = ref.base.srcs[n].replace(/\[(\s*)$/, '$1');
                 return ref.set(s);
             }
             if (node.type === tkn.GENERATOR) {
