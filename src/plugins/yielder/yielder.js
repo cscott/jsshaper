@@ -1116,22 +1116,27 @@ Shaper("yielder", function(root) {
             if (node.type === tkn.FUNCTION) {
                 f = this.func_stack.pop();
                 // hoist any of this function's children who need it.
+                var hfunc = [];
                 for (i=f.hoist.length-1; i>=0; i--) {
                     var sref = f.hoist[i];
                     s = sref.get();
                     // grab the 'src' which is about to be deleted by .remove()
                     // (this logic is copied from the Shaper.remove())
                     var index = Number(sref.properties[1]);
-                    if (index !== sref.base[sref.properties[0]].length) {
+                    var len = sref.base[sref.properties[0]].length;
+                    if (index !== (len-1)) {
                         index++;
                     }
-                    var src = sref.base.srcs[index];
+                    var src = (len===1)?'':sref.base.srcs[index];
                     // remove the statement from its old location
                     Shaper.remove(sref);
                     // add it to the top of the function.
-                    Shaper.insertBefore(new Ref(node.body, 'children', 0),
-                                        s, src);
+                    hfunc.push([s, src]);
                 }
+                hfunc.forEach(function(ss) {
+                    Shaper.insertBefore(new Ref(node.body, 'children', 0),
+                                        ss[0], ss[1]);
+                });
                 var parent = this.func_stack[this.func_stack.length-1];
                 if (ref.base === root) {
                     /* leave top level decls alone */
@@ -1144,6 +1149,11 @@ Shaper("yielder", function(root) {
                     var name = node.name || gensym('f');
                     s = Shaper.replace(Shaper.parse('var '+name+' = $;'),
                                        node);
+                    // move leading and trailing comments (this avoids a
+                    // bad line break after 'var <name>'!)
+                    Shaper.cloneComments(s, node);
+                    delete node.leadingComment;
+                    delete node.trailingComment;
                     if (ref.base === parent.func.body) {
                         // for top-level function statements, mark them
                         // for hoisting to the top of the function.
