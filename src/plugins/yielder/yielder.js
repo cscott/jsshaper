@@ -848,10 +848,15 @@ Shaper("yielder", function(root) {
         if (props.scopeName) {
             stmts.push(Shaper.parse('var '+props.scopeName+'=Object.create(null);'));
         }
+        var body = node.body;
+        if (body.type === tkn.GENERATOR) {
+            // Narcissus started adding an extra node here in commit 82c9b732
+            body = body.body;
+        }
         var yv = new YieldVisitor(props);
-        console.assert(node.body.children.length > 0);
-        // first and last node.body.srcs elements stay with outer function.
-        var old_srcs = node.body.srcs;
+        console.assert(body.children.length > 0);
+        // first and last body.srcs elements stay with outer function.
+        var old_srcs = body.srcs;
         var inner_srcs = old_srcs.slice(1, old_srcs.length-1);
         inner_srcs.push('');
 
@@ -860,7 +865,7 @@ Shaper("yielder", function(root) {
                             'throw new TypeError();'+
                             '}'), '');
         // translate function
-        yv.visitBlock(node.body.children, inner_srcs);
+        yv.visitBlock(body.children, inner_srcs);
         yv.close();
         yv.optimizeBranches();
 
@@ -888,11 +893,11 @@ Shaper("yielder", function(root) {
         stmts.push(newBody);
 
         // hollow out old function and replace it with new function body
-        funcBodyStart(node.body, old_srcs[0]);
+        funcBodyStart(body, old_srcs[0]);
         stmts.forEach(function(stmt) {
-            funcBodyAdd(node.body, stmt, '');
+            funcBodyAdd(body, stmt, '');
         });
-        funcBodyFinish(node.body, old_srcs[old_srcs.length-1]);
+        funcBodyFinish(body, old_srcs[old_srcs.length-1]);
 
         return node;
     }
@@ -901,7 +906,8 @@ Shaper("yielder", function(root) {
     root = Shaper.traverse(root, {
         post: function(node, ref) {
             if (node.type === tkn.FUNCTION &&
-                node.body.type !== tkn.SCRIPT) {
+                node.body.type !== tkn.SCRIPT &&
+                node.body.type !== tkn.GENERATOR) {
                 var s = Shaper.parse("_=function(){return $;}")
                     .children[1].body;
                 s = Shaper.replace(s, node.body);
@@ -909,6 +915,7 @@ Shaper("yielder", function(root) {
             }
         }
     });
+
     // rewrite generator expressions and array comprehensions
     root = Shaper.traverse(root, {
         generator: function(node) {
@@ -921,7 +928,7 @@ Shaper("yielder", function(root) {
             Shaper.cloneComments(s, node);
 
             var y = Shaper.parse('function _(){if ($) yield ($);}').
-                body.children[0];
+                body.body.children[0];
             forLoop.body = Shaper.replace(y, guard, node.expression);
 
             // _iterator is not/no longer a varDecl.
@@ -948,7 +955,9 @@ Shaper("yielder", function(root) {
                 s = Shaper.replace(s, this.generator(node));
                 return ref.set(s);
             }
-            if (node.type === tkn.GENERATOR) {
+            if (node.type === tkn.GENERATOR &&
+                !(ref.base.type === tkn.FUNCTION &&
+                  ref.properties[0] === 'body')) {
                 s = Shaper.parse('($)');
                 s = Shaper.replace(s, this.generator(node));
                 return ref.set(s);
